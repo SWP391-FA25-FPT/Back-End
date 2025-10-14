@@ -1,0 +1,18 @@
+name: Sync to HuggingFace Space
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout repo
+      - uses: actions/checkout@v4
+ 
+      # Push to hub
+      - name: Push to hub
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+            run: git push -f https://toan215:$HF_TOKEN@huggingface.co/spaces/toan215/Meta-Meal
