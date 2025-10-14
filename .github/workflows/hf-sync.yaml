@@ -9,12 +9,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Checkout repo
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          lfs: true
  
       # Push to hub
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          git remote add hf https://toan215:$HF_TOKEN@huggingface.co/spaces/toan215/Meta-Meal
-          git push -f hf main
+        run: git push https://toan215:$HF_TOKEN@huggingface.co/spaces/toan215/Meta-Meal main
