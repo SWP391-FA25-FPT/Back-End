@@ -18,4 +18,6 @@ jobs:
       - name: Push to hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: git push https://toan215:$HF_TOKEN@huggingface.co/spaces/toan215/Meta-Meal main
+        run: |
+          git remote add hf https://toan215:$HF_TOKEN@huggingface.co/spaces/toan215/Meta-Meal
+          git push hf main --force
