@@ -24,7 +24,10 @@ app.use('/api/user', userRoutes);
 
 // Test route
 app.get('/', (req, res) => {
-  res.send("🚀 Hello from Express.js running on Hugging Face Space Docker!");
+  res.json({ 
+    message: "🚀 Meta-Meal API is running on Hugging Face Space!",
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Error handling middleware
@@ -33,7 +36,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 7860;
 
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
