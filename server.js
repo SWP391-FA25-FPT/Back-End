@@ -24,7 +24,7 @@ app.use('/api/user', userRoutes);
 
 // Test route
 app.get('/', (req, res) => {
-  res.json({ message: 'Meta Meal Backend API is running!' });
+  res.send("🚀 Hello from Express.js running on Hugging Face Space Docker!");
 });
 
 // Error handling middleware
