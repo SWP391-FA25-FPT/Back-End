@@ -1,10 +1,10 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import connectDB, { checkDBStatus } from './config/db.js';
-import { checkCloudinaryStatus } from './config/cloudinary.js';
-import authRoutes from './routes/auth.routes.js';
-import userRoutes from './routes/user.routes.js';
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import connectDB, { checkDBStatus } from "./config/db.js";
+import { checkCloudinaryStatus } from "./config/cloudinary.js";
+import authRoutes from "./routes/auth.routes.js";
+import userRoutes from "./routes/user.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -20,34 +20,39 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/user', userRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/user", userRoutes);
 
 // Status route
-app.get('/', async (req, res) => {
+app.get("/", async (req, res) => {
   try {
     const dbStatus = checkDBStatus();
     const cloudinaryStatus = await checkCloudinaryStatus();
 
-    const allHealthy = 
-      dbStatus.status === 'connected' && 
-      cloudinaryStatus.status === 'connected';
+    const allHealthy =
+      dbStatus.status === "connected" &&
+      cloudinaryStatus.status === "connected";
 
-    const statusEmoji = allHealthy ? '✅' : '⚠️';
-    
-    res.send(
-      `${statusEmoji} Meta-Meal API Status\n\n` +
-      `Time: ${new Date().toLocaleString()}\n\n` +
-      `--- Database (MongoDB) ---\n` +
-      `Status: ${dbStatus.status === 'connected' ? '✅' : '❌'} ${dbStatus.status}\n` +
-      `Host: ${dbStatus.host}\n` +
-      `Database: ${dbStatus.database}\n\n` +
-      `--- Cloudinary ---\n` +
-      `Status: ${cloudinaryStatus.status === 'connected' ? '✅' : '❌'} ${cloudinaryStatus.status}\n` +
-      `Folder: ${cloudinaryStatus.folder || 'N/A'}\n` +
-      `Resources: ${cloudinaryStatus.resources || 'N/A'}\n` +
-      `Rate Limit: ${cloudinaryStatus.rate_limit_remaining || 'N/A'}`
-    );
+    const statusEmoji = allHealthy ? "✅" : "⚠️";
+
+    res.send(`<pre>
+${statusEmoji} Meta-Meal API Status
+
+Time: ${new Date().toLocaleString()}
+
+--- Database (MongoDB) ---
+Status: ${dbStatus.status === "connected" ? "✅" : "❌"} ${dbStatus.status}
+Host: ${dbStatus.host}
+Database: ${dbStatus.database}
+
+--- Cloudinary ---
+Status: ${cloudinaryStatus.status === "connected" ? "✅" : "❌"} ${
+      cloudinaryStatus.status
+    }
+Folder: ${cloudinaryStatus.folder || "N/A"}
+Resources: ${cloudinaryStatus.resources || "N/A"}
+Rate Limit: ${cloudinaryStatus.rate_limit_remaining || "N/A"}
+</pre>`);
   } catch (error) {
     res.status(503).send(`❌ Error: ${error.message}`);
   }
@@ -56,7 +61,7 @@ app.get('/', async (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+  res.status(500).json({ error: "Something went wrong!" });
 });
 
 const PORT = process.env.PORT || 7860;
@@ -64,5 +69,3 @@ const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => {
   console.log(`🚀 Server is running on port ${PORT}`);
 });
-
-
