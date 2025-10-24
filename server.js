@@ -35,29 +35,21 @@ app.get('/', async (req, res) => {
 
     const statusEmoji = allHealthy ? '✅' : '⚠️';
     
-    res.send(`
-      <h1>${statusEmoji} Meta-Meal API Status</h1>
-      <p><strong>Time:</strong> ${new Date().toLocaleString()}</p>
-      <hr>
-      <h2>Database (MongoDB)</h2>
-      <ul>
-        <li>Status: ${dbStatus.status === 'connected' ? '✅' : '❌'} ${dbStatus.status}</li>
-        <li>Host: ${dbStatus.host}</li>
-        <li>Database: ${dbStatus.database}</li>
-      </ul>
-      <h2>Cloudinary</h2>
-      <ul>
-        <li>Status: ${cloudinaryStatus.status === 'connected' ? '✅' : '❌'} ${cloudinaryStatus.status}</li>
-        <li>Folder: ${cloudinaryStatus.folder || 'N/A'}</li>
-        <li>Resources: ${cloudinaryStatus.resources || 'N/A'}</li>
-        <li>Rate Limit: ${cloudinaryStatus.rate_limit_remaining || 'N/A'}</li>
-      </ul>
-    `);
+    res.send(
+      `${statusEmoji} Meta-Meal API Status\n\n` +
+      `Time: ${new Date().toLocaleString()}\n\n` +
+      `--- Database (MongoDB) ---\n` +
+      `Status: ${dbStatus.status === 'connected' ? '✅' : '❌'} ${dbStatus.status}\n` +
+      `Host: ${dbStatus.host}\n` +
+      `Database: ${dbStatus.database}\n\n` +
+      `--- Cloudinary ---\n` +
+      `Status: ${cloudinaryStatus.status === 'connected' ? '✅' : '❌'} ${cloudinaryStatus.status}\n` +
+      `Folder: ${cloudinaryStatus.folder || 'N/A'}\n` +
+      `Resources: ${cloudinaryStatus.resources || 'N/A'}\n` +
+      `Rate Limit: ${cloudinaryStatus.rate_limit_remaining || 'N/A'}`
+    );
   } catch (error) {
-    res.status(503).send(`
-      <h1>❌ Error</h1>
-      <p>${error.message}</p>
-    `);
+    res.status(503).send(`❌ Error: ${error.message}`);
   }
 });
 
