@@ -1,64 +1,58 @@
-import mongoose from "mongoose";
+const mongoose = require('mongoose');
 
-const IngredientSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
-    amount: { type: String, required: true },
-  },
-  { _id: false }
-);
+// Schema cho nguyên liệu
+const ingredientSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  amount: { type: String, required: true }
+}, { _id: false });
 
-const StepSchema = new mongoose.Schema(
-  {
-    title: { type: String, required: true },
-    description: { type: String, required: true },
-  },
-  { _id: false }
-);
+// Schema cho các bước thực hiện
+const stepSchema = new mongoose.Schema({
+  description: { type: String, required: true },
+  image: { type: String } // Optional Cloudinary URL
+}, { _id: false });
 
-const NutritionSchema = new mongoose.Schema(
-  {
-    calories: { type: Number, required: true },
-    protein: { type: Number, required: true },
-    carbs: { type: Number, required: true },
-    fat: { type: Number, required: true },
-    fiber: { type: Number, required: true },
-    sugar: { type: Number, required: true },
-  },
-  { _id: false }
-);
+// Schema cho thông tin dinh dưỡng
+const nutritionSchema = new mongoose.Schema({
+  calories: Number,
+  protein: Number,
+  carbs: Number,
+  fat: Number,
+  fiber: Number,
+  sugar: Number
+}, { _id: false });
 
-const RelatedRecipeSchema = new mongoose.Schema(
-  {
-    id: { type: String, required: true },
-    name: { type: String, required: true },
-    image: { type: String, required: true },
-  },
-  { _id: false }
-);
+// Schema cho phản ứng
+const reactionSchema = new mongoose.Schema({
+  type: { type: String, enum: ['delicious', 'love', 'fire'] },
+  count: { type: Number, default: 0 }
+}, { _id: false });
 
-const RecipeSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
-    description: { type: String },
-    image: { type: String },
-    prepTime: { type: String },
-    cookTime: { type: String },
-    totalTime: { type: String },
-    servings: { type: Number },
-    calories: { type: Number },
-    difficulty: { type: String, enum: ["Dễ", "Trung bình", "Khó"] },
-    tags: [{ type: String }],
-    ingredients: [IngredientSchema],
-    steps: [StepSchema],
-    nutrition: NutritionSchema,
-    tips: [{ type: String }],
-    relatedRecipes: [RelatedRecipeSchema],
-    videoUrl: { type: String },
-  },
-  {
-    timestamps: true,
-  }
-);
+// Schema chính cho công thức nấu ăn
+const recipeSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true },
+  author: { type: String, required: true, trim: true },
+  description: { type: String, required: true },
+  image: { type: String, required: true }, // Cloudinary URL
+  totalTime: { type: String },
+  servings: { type: Number, required: true },
+  tags: [{ type: String }],
+  ingredients: [ingredientSchema],
+  steps: [stepSchema],
+  nutrition: nutritionSchema,
+  tips: [{ type: String }],
+  reactions: [reactionSchema],
+  views: { type: Number, default: 0 },
+  saves: { type: Number, default: 0 },
+  trustScore: { type: Number, default: 0 }
+}, {
+  timestamps: true // Tự động thêm createdAt, updatedAt
+});
 
-export default mongoose.models.Recipe || mongoose.model("Recipe", RecipeSchema);
+// Index để sort theo views, trustScore
+recipeSchema.index({ views: -1 });
+recipeSchema.index({ trustScore: -1 });
+recipeSchema.index({ createdAt: -1 });
+
+module.exports = mongoose.model('Recipe', recipeSchema);
+
