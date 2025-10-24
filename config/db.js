@@ -15,6 +15,23 @@ const connectDB = async () => {
   }
 };
 
+// Function kiểm tra status
+export const checkDBStatus = () => {
+  const state = mongoose.connection.readyState;
+  const states = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  
+  return {
+    status: states[state] || 'unknown',
+    host: mongoose.connection.host || 'N/A',
+    database: mongoose.connection.name || 'N/A'
+  };
+};
+
 export default connectDB;
 
 

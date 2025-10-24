@@ -1,7 +1,9 @@
-const cloudinary = require("cloudinary").v2;
-const { CloudinaryStorage } = require("multer-storage-cloudinary");
-const multer = require("multer");
-require("dotenv").config();
+import { v2 as cloudinary } from 'cloudinary';
+import { CloudinaryStorage } from 'multer-storage-cloudinary';
+import multer from 'multer';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 // Cấu hình Cloudinary
 cloudinary.config({
@@ -9,30 +11,6 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-
-// Kiểm tra kết nối
-// Kiểm tra kết nối và folder
-cloudinary.api.ping()
-  .then(() => {
-    console.log('✅ Cloudinary connected');
-    return cloudinary.api.resources({ 
-      type: 'upload', 
-      prefix: 'Meta-Meal',
-      max_results: 5 
-    });
-  })
-  .then(result => {
-    console.log(`📁 Folder: Meta-Meal`);
-    console.log(`📊 Total resources: ${result.resources.length}`);
-    console.log(`💾 Rate limit remaining: ${result.rate_limit_remaining || 'N/A'}`);
-  })
-  .catch(err => {
-    if (err.http_code === 404) {
-      console.log('📁 Folder "Meta-Meal" chưa có resources (sẽ tự tạo khi upload)');
-    } else {
-      console.error('❌ Cloudinary error:', err.message);
-    }
-  });
 
 // Cấu hình storage
 const storage = new CloudinaryStorage({
@@ -61,4 +39,27 @@ const upload = multer({
   }
 });
 
-module.exports = { cloudinary, upload };
+// Function kiểm tra status
+export const checkCloudinaryStatus = async () => {
+  try {
+    await cloudinary.api.ping();
+    const resources = await cloudinary.api.resources({ 
+      type: 'upload', 
+      prefix: 'Meta-Meal',
+      max_results: 1 
+    });
+    return {
+      status: 'connected',
+      folder: 'Meta-Meal',
+      resources: resources.resources.length,
+      rate_limit_remaining: resources.rate_limit_remaining || 'N/A'
+    };
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error.message
+    };
+  }
+};
+
+export { cloudinary, upload };
