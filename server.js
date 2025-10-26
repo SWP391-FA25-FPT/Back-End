@@ -5,6 +5,9 @@ import connectDB, { checkDBStatus } from "./config/db.js";
 import { checkCloudinaryStatus } from "./config/cloudinary.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
+import recipeRoutes from "./routes/recipe.routes.js";
+import analyticsRoutes from "./routes/analytics.routes.js";
+import userHistoryRoutes from "./routes/userHistory.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -22,6 +25,9 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
+app.use("/api/recipes", recipeRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/user/history", userHistoryRoutes);
 
 // Status route
 app.get("/", async (req, res) => {

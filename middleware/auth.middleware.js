@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.model.js';
+import Recipe from '../models/Recipe.js';
 
 // Protect routes - check if user is authenticated
 export const protect = async (req, res, next) => {
@@ -56,6 +57,41 @@ export const admin = (req, res, next) => {
     res.status(403).json({ 
       success: false,
       error: 'Not authorized as an admin' 
+    });
+  }
+};
+
+// Check recipe ownership middleware (author or admin)
+export const checkRecipeOwnership = async (req, res, next) => {
+  try {
+    const recipe = await Recipe.findById(req.params.id);
+
+    if (!recipe) {
+      return res.status(404).json({
+        success: false,
+        error: 'Không tìm thấy công thức'
+      });
+    }
+
+    // Check if user is author or admin
+    const isAuthor = recipe.authorId.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isAuthor && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Bạn không có quyền thực hiện thao tác này'
+      });
+    }
+
+    // Attach recipe to request for later use
+    req.recipe = recipe;
+    next();
+  } catch (error) {
+    console.error('Check recipe ownership error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Server error'
     });
   }
 };

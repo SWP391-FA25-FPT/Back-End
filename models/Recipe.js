@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 // Schema cho nguyên liệu
 const ingredientSchema = new mongoose.Schema({
@@ -32,8 +32,9 @@ const reactionSchema = new mongoose.Schema({
 const recipeSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
   author: { type: String, required: true, trim: true },
+  authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   description: { type: String, required: true },
-  image: { type: String, required: true }, // Cloudinary URL
+  image: { type: String, required: true }, // Image URL
   totalTime: { type: String },
   servings: { type: Number, required: true },
   tags: [{ type: String }],
@@ -54,5 +55,5 @@ recipeSchema.index({ views: -1 });
 recipeSchema.index({ trustScore: -1 });
 recipeSchema.index({ createdAt: -1 });
 
-module.exports = mongoose.model('Recipe', recipeSchema);
+export default mongoose.model('Recipe', recipeSchema);
 

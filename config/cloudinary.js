@@ -39,6 +39,33 @@ const upload = multer({
   }
 });
 
+// Cấu hình storage riêng cho recipes
+const recipeStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "Meta-Meal/recipes",
+    allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
+    transformation: [{ width: 1200, height: 1200, crop: "limit" }]
+  }
+});
+
+// Cấu hình upload cho recipes với nhiều ảnh
+const uploadRecipe = multer({
+  storage: recipeStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const isValid = allowedTypes.test(file.originalname.toLowerCase()) && 
+                    allowedTypes.test(file.mimetype);
+    
+    if (isValid) {
+      cb(null, true);
+    } else {
+      cb(new Error("Chỉ cho phép upload file ảnh (JPEG, JPG, PNG, GIF, WEBP)"));
+    }
+  }
+});
+
 // Function kiểm tra status
 export const checkCloudinaryStatus = async () => {
   try {
@@ -62,4 +89,4 @@ export const checkCloudinaryStatus = async () => {
   }
 };
 
-export { cloudinary, upload };
+export { cloudinary, upload, uploadRecipe };
