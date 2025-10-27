@@ -61,6 +61,36 @@ export const admin = (req, res, next) => {
   }
 };
 
+// Optional auth - attach user if token exists, but don't require it
+export const optionalAuth = async (req, res, next) => {
+  try {
+    let token;
+
+    // Check for token in header
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+      token = req.headers.authorization.split(' ')[1];
+    }
+
+    if (token) {
+      try {
+        // Verify token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'default-secret');
+
+        // Get user from token
+        req.user = await User.findById(decoded.id).select('-password');
+      } catch (error) {
+        // Token invalid but don't block request
+        req.user = null;
+      }
+    }
+
+    next();
+  } catch (error) {
+    console.error('Optional auth middleware error:', error);
+    next();
+  }
+};
+
 // Check recipe ownership middleware (author or admin)
 export const checkRecipeOwnership = async (req, res, next) => {
   try {

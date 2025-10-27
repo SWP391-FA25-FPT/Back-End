@@ -1,10 +1,14 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const CommentSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   recipeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Recipe', required: true },
   text: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now },
+}, {
+  timestamps: true // Tự động thêm createdAt, updatedAt
 });
 
-module.exports = mongoose.models.Comment || mongoose.model('Comment', CommentSchema);
+// Index để query nhanh theo recipeId
+CommentSchema.index({ recipeId: 1, createdAt: -1 });
+
+export default mongoose.model('Comment', CommentSchema);

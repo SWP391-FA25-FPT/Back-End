@@ -163,7 +163,12 @@ export const getAllRecipes = async (req, res) => {
 // @access  Public
 export const getRecipeById = async (req, res) => {
   try {
-    const recipe = await Recipe.findById(req.params.id);
+    // Increment views using findByIdAndUpdate to avoid validation issues
+    const recipe = await Recipe.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { views: 1 } },
+      { new: true, runValidators: false }
+    );
 
     if (!recipe) {
       return res.status(404).json({
@@ -171,10 +176,6 @@ export const getRecipeById = async (req, res) => {
         error: 'Không tìm thấy công thức'
       });
     }
-
-    // Increment views
-    recipe.views += 1;
-    await recipe.save();
 
     res.status(200).json({
       success: true,
@@ -320,6 +321,158 @@ export const deleteRecipe = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Lỗi khi xóa công thức'
+    });
+  }
+};
+
+// @desc    Search recipes with advanced filters
+// @route   GET /api/recipes/search
+// @access  Public
+export const searchRecipes = async (req, res) => {
+  try {
+    const {
+      q,
+      tags,
+      page = 1,
+      limit = 20,
+      sortBy = 'createdAt',
+      minTrustScore
+    } = req.query;
+
+    // Build search query
+    const query = {};
+
+    // Search by keyword in name, description, or tags
+    if (q && q.trim() !== '') {
+      const searchRegex = { $regex: q.trim(), $options: 'i' };
+      query.$or = [
+        { name: searchRegex },
+        { description: searchRegex },
+        { tags: searchRegex }
+      ];
+    }
+
+    // Filter by specific tags
+    if (tags) {
+      const tagArray = tags.split(',').map(tag => tag.trim());
+      query.tags = { $in: tagArray };
+    }
+
+    // Filter by minimum trust score
+    if (minTrustScore) {
+      query.trustScore = { $gte: parseInt(minTrustScore) };
+    }
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort options
+    const sortOptions = {
+      views: { views: -1 },
+      trustScore: { trustScore: -1 },
+      createdAt: { createdAt: -1 },
+      newest: { createdAt: -1 },
+      popular: { views: -1 }
+    };
+    const sort = sortOptions[sortBy] || sortOptions.createdAt;
+
+    // Execute query
+    const recipes = await Recipe.find(query)
+      .sort(sort)
+      .skip(skip)
+      .limit(limitNum);
+
+    // Get total count for pagination
+    const total = await Recipe.countDocuments(query);
+
+    // Get verified recipes (high trust score) for the search
+    const verifiedRecipes = await Recipe.find({
+      ...query,
+      trustScore: { $gte: 70 }
+    })
+      .sort({ trustScore: -1 })
+      .limit(10);
+
+    res.status(200).json({
+      success: true,
+      data: recipes,
+      verifiedRecipes,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
+      },
+      searchQuery: q || ''
+    });
+  } catch (error) {
+    console.error('Search recipes error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi tìm kiếm công thức'
+    });
+  }
+};
+
+// @desc    Add reaction to recipe
+// @route   POST /api/recipes/:id/reactions
+// @access  Public
+export const addReaction = async (req, res) => {
+  try {
+    const { type } = req.body;
+    const recipeId = req.params.id;
+
+    // Validate reaction type
+    const validReactionTypes = ['delicious', 'love', 'fire'];
+    if (!type || !validReactionTypes.includes(type)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Loại reaction không hợp lệ. Chỉ chấp nhận: delicious, love, fire'
+      });
+    }
+
+    // Find recipe and update reaction count
+    const recipe = await Recipe.findById(recipeId);
+    
+    if (!recipe) {
+      return res.status(404).json({
+        success: false,
+        error: 'Không tìm thấy công thức'
+      });
+    }
+
+    // Find the reaction in array and increment
+    const reactionIndex = recipe.reactions.findIndex(r => r.type === type);
+    
+    if (reactionIndex !== -1) {
+      recipe.reactions[reactionIndex].count += 1;
+    } else {
+      // If reaction type doesn't exist, add it
+      recipe.reactions.push({ type, count: 1 });
+    }
+
+    await recipe.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Đã thêm reaction thành công',
+      data: recipe.reactions
+    });
+  } catch (error) {
+    console.error('Add reaction error:', error);
+    
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({
+        success: false,
+        error: 'Không tìm thấy công thức'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi thêm reaction'
     });
   }
 };

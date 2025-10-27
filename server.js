@@ -8,6 +8,8 @@ import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import userHistoryRoutes from "./routes/userHistory.routes.js";
+import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
+import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -28,6 +30,10 @@ app.use("/api/user", userRoutes);
 app.use("/api/recipes", recipeRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/user/history", userHistoryRoutes);
+
+// Comment and Rating routes
+app.use("/api/comments", commentDeleteRouter);
+app.use("/api/ratings", ratingDeleteRouter);
 
 // Status route
 app.get("/", async (req, res) => {
