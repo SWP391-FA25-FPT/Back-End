@@ -1,4 +1,5 @@
 import Recipe from '../models/Recipe.js';
+import { cloudinary } from '../config/cloudinary.js';
 
 // @desc    Create new recipe
 // @route   POST /api/recipes
@@ -295,7 +296,8 @@ export const updateRecipe = async (req, res) => {
       ingredients,
       steps,
       nutrition,
-      tips
+      tips,
+      status
     } = req.body;
 
     // Update fields if provided
@@ -303,6 +305,11 @@ export const updateRecipe = async (req, res) => {
     if (description) recipe.description = description;
     if (totalTime) recipe.totalTime = totalTime;
     if (servings) recipe.servings = servings;
+    
+    // Update status (nếu có và hợp lệ)
+    if (status && ['draft', 'private', 'published'].includes(status)) {
+      recipe.status = status;
+    }
     
     // Handle JSON fields
     if (tags) {
@@ -323,6 +330,21 @@ export const updateRecipe = async (req, res) => {
 
     // Update main image if uploaded
     if (req.files && req.files.image && req.files.image[0]) {
+      // Xóa ảnh cũ trên Cloudinary (nếu có)
+      if (recipe.image && recipe.image.includes('cloudinary.com')) {
+        try {
+          // Extract public_id from Cloudinary URL
+          const urlParts = recipe.image.split('/');
+          const filename = urlParts[urlParts.length - 1];
+          const publicId = `Meta-Meal/recipes/${filename.split('.')[0]}`;
+          await cloudinary.uploader.destroy(publicId);
+          console.log('Deleted old main image:', publicId);
+        } catch (err) {
+          console.error('Error deleting old main image:', err.message);
+          // Không throw error, tiếp tục update
+        }
+      }
+      
       recipe.image = req.files.image[0].path;
     }
 
@@ -331,6 +353,21 @@ export const updateRecipe = async (req, res) => {
       const stepImages = req.files.stepImages;
       recipe.steps.forEach((step, index) => {
         if (stepImages[index]) {
+          // Xóa ảnh cũ của step (nếu có)
+          if (step.image && step.image.includes('cloudinary.com')) {
+            try {
+              const urlParts = step.image.split('/');
+              const filename = urlParts[urlParts.length - 1];
+              const publicId = `Meta-Meal/recipes/${filename.split('.')[0]}`;
+              cloudinary.uploader.destroy(publicId).catch(err => 
+                console.error('Error deleting old step image:', err.message)
+              );
+              console.log('Deleted old step image:', publicId);
+            } catch (err) {
+              console.error('Error processing old step image:', err.message);
+            }
+          }
+          
           step.image = stepImages[index].path;
         }
       });
@@ -587,12 +624,53 @@ export const getMyRecipes = async (req, res) => {
       return getSavedRecipes(req, res);
     }
 
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Special handling for "all" - include both user's recipes and saved recipes
+    if (statusType === 'all') {
+      // Get user's own recipes
+      const userRecipes = await Recipe.find({ authorId: req.user._id })
+        .sort({ updatedAt: -1 });
+
+      // Get saved recipes
+      const User = (await import('../models/User.model.js')).default;
+      const user = await User.findById(req.user._id);
+      
+      let savedRecipes = [];
+      if (user && user.favorites && user.favorites.length > 0) {
+        savedRecipes = await Recipe.find({ 
+          _id: { $in: user.favorites },
+          authorId: { $ne: req.user._id } // Exclude user's own recipes from saved list
+        }).sort({ updatedAt: -1 });
+      }
+
+      // Combine and sort by updatedAt
+      const allRecipes = [...userRecipes, ...savedRecipes]
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+      // Apply pagination
+      const total = allRecipes.length;
+      const paginatedRecipes = allRecipes.slice(skip, skip + limitNum);
+
+      return res.status(200).json({
+        success: true,
+        data: paginatedRecipes,
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum)
+        }
+      });
+    }
+
+    // For other status types, filter by specific status
     let query = { authorId: req.user._id };
 
-    // Filter by status type
-    if (statusType === 'all') {
-      // All recipes (draft, private, published)
-    } else if (statusType === 'drafts') {
+    if (statusType === 'drafts') {
       query.status = 'draft';
     } else if (statusType === 'private') {
       query.status = 'private';
@@ -604,11 +682,6 @@ export const getMyRecipes = async (req, res) => {
         error: 'Invalid status type'
       });
     }
-
-    // Pagination
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
-    const skip = (pageNum - 1) * limitNum;
 
     const recipes = await Recipe.find(query)
       .sort({ updatedAt: -1 })

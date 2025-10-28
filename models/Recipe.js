@@ -50,35 +50,47 @@ const recipeSchema = new mongoose.Schema({
     type: String, 
     enum: ['draft', 'private', 'published'], 
     default: 'draft' 
-  }
+  },
+  lastEditedAt: { type: Date, default: Date.now },
+  publishedAt: { type: Date }
 }, {
   timestamps: true // Tự động thêm createdAt, updatedAt
 });
 
-// Custom validation - chỉ yêu cầu fields đầy đủ khi status là 'published'
+// Custom validation và auto-update timestamps
 recipeSchema.pre('save', function(next) {
-  if (this.status === 'published') {
-    // Validate required fields for published recipes
+  // Update lastEditedAt mỗi khi save (trừ khi chỉ update views/saves/reactions)
+  if (this.isModified()) {
+    this.lastEditedAt = new Date();
+  }
+  
+  // Set publishedAt khi chuyển sang published lần đầu
+  if (this.isModified('status') && this.status === 'published' && !this.publishedAt) {
+    this.publishedAt = new Date();
+  }
+  
+  // Validate required fields khi status là 'published' hoặc 'private'
+  if (this.status === 'published' || this.status === 'private') {
     if (!this.name || this.name.trim() === '') {
-      return next(new Error('Tên món ăn là bắt buộc khi publish'));
+      return next(new Error('Tên món ăn là bắt buộc'));
     }
     if (!this.author || this.author.trim() === '') {
-      return next(new Error('Tác giả là bắt buộc khi publish'));
+      return next(new Error('Tác giả là bắt buộc'));
     }
     if (!this.description || this.description.trim() === '') {
-      return next(new Error('Mô tả là bắt buộc khi publish'));
+      return next(new Error('Mô tả là bắt buộc'));
     }
     if (!this.image || this.image.trim() === '') {
-      return next(new Error('Ảnh món ăn là bắt buộc khi publish'));
+      return next(new Error('Ảnh món ăn là bắt buộc'));
     }
     if (!this.servings || this.servings < 1) {
-      return next(new Error('Số khẩu phần là bắt buộc khi publish'));
+      return next(new Error('Số khẩu phần là bắt buộc'));
     }
     if (!this.ingredients || this.ingredients.length === 0) {
-      return next(new Error('Nguyên liệu là bắt buộc khi publish'));
+      return next(new Error('Nguyên liệu là bắt buộc'));
     }
     if (!this.steps || this.steps.length === 0) {
-      return next(new Error('Các bước thực hiện là bắt buộc khi publish'));
+      return next(new Error('Các bước thực hiện là bắt buộc'));
     }
   }
   next();
