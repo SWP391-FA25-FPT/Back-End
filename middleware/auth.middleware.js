@@ -103,8 +103,8 @@ export const checkRecipeOwnership = async (req, res, next) => {
       });
     }
 
-    // Check if user is author or admin
-    const isAuthor = recipe.authorId.toString() === req.user._id.toString();
+    // Check if user is author or admin (check if authorId exists)
+    const isAuthor = recipe.authorId && recipe.authorId.toString() === req.user._id.toString();
     const isAdmin = req.user.role === 'admin';
 
     if (!isAuthor && !isAdmin) {
