@@ -6,6 +6,7 @@ import { checkCloudinaryStatus } from "./config/cloudinary.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
+import blogRoutes from "./routes/blog.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import userHistoryRoutes from "./routes/userHistory.routes.js";
 import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
@@ -28,6 +29,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/recipes", recipeRoutes);
+app.use("/api/blogs", blogRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/user/history", userHistoryRoutes);
 
