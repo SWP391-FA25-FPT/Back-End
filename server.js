@@ -6,11 +6,12 @@ import { checkCloudinaryStatus } from "./config/cloudinary.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
-import blogRoutes from "./routes/blog.routes.js";
 import analyticsRoutes from "./routes/analytics.routes.js";
 import userHistoryRoutes from "./routes/userHistory.routes.js";
 import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
 import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
+import subscriptionRoutes from "./routes/subscription.routes.js";
+import aiRoutes from "./routes/ai.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -29,13 +30,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/recipes", recipeRoutes);
-app.use("/api/blogs", blogRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/user/history", userHistoryRoutes);
 
 // Comment and Rating routes
 app.use("/api/comments", commentDeleteRouter);
 app.use("/api/ratings", ratingDeleteRouter);
+
+// Subscription routes
+app.use("/api/subscriptions", subscriptionRoutes);
+
+// AI routes
+app.use("/api/ai", aiRoutes);
 
 // Status route
 app.get("/", async (req, res) => {
