@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import connectDB, { checkDBStatus } from "./config/db.js";
 import { checkCloudinaryStatus } from "./config/cloudinary.js";
+import { checkAIHealth } from "./config/ai.config.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
@@ -12,6 +13,7 @@ import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
 import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+
 
 // Load environment variables
 dotenv.config();
@@ -48,10 +50,11 @@ app.get("/", async (req, res) => {
   try {
     const dbStatus = checkDBStatus();
     const cloudinaryStatus = await checkCloudinaryStatus();
-
+    const aiStatus = await checkAIHealth();
     const allHealthy =
       dbStatus.status === "connected" &&
-      cloudinaryStatus.status === "connected";
+      cloudinaryStatus.status === "connected" &&
+      aiStatus.status === "connected";
 
     const statusEmoji = allHealthy ? "✅" : "⚠️";
 
@@ -72,7 +75,13 @@ Status: ${cloudinaryStatus.status === "connected" ? "✅" : "❌"} ${
 Folder: ${cloudinaryStatus.folder || "N/A"}
 Resources: ${cloudinaryStatus.resources || "N/A"}
 Rate Limit: ${cloudinaryStatus.rate_limit_remaining || "N/A"}
-</pre>`);
+
+--- AI ---
+Status: ${aiStatus.status === "connected" ? "✅" : "❌"} ${aiStatus.status}
+Model: ${aiStatus.model || "N/A"}
+Rate Limit: ${aiStatus.rate_limit_remaining || "N/A"}
+</pre>`
+);
   } catch (error) {
     res.status(503).send(`❌ Error: ${error.message}`);
   }
