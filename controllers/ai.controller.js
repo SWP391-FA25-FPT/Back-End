@@ -167,6 +167,7 @@ export const healthCheck = async (req, res) => {
     const response = await result.response;
     
     return res.status(200).json({
+      status: "connected",
       success: true,
       message: "AI service is healthy",
       modelWorking: true,
@@ -174,6 +175,7 @@ export const healthCheck = async (req, res) => {
     });
   } catch (error) {
     return res.status(200).json({
+      status: "error",
       success: true,
       message: "AI service is running but model may not be available",
       modelWorking: false,
