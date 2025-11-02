@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import connectDB, { checkDBStatus } from "./config/db.js";
 import { checkCloudinaryStatus } from "./config/cloudinary.js";
-import { checkAIHealth } from "./controllers/ai.controller.js";
+import { healthCheck } from "./controllers/ai.controller.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
@@ -50,7 +50,7 @@ app.get("/", async (req, res) => {
   try {
     const dbStatus = checkDBStatus();
     const cloudinaryStatus = await checkCloudinaryStatus();
-    const aiStatus = await checkAIHealth();
+    const aiStatus = await healthCheck();
     const allHealthy =
       dbStatus.status === "connected" &&
       cloudinaryStatus.status === "connected" &&
