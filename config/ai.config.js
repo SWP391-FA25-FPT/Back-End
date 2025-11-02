@@ -1,11 +1,18 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-
 // API Key - Store in environment variable in production
 export const API_KEY = process.env.GEMINI_API_KEY;
 
 // Initialize Gemini AI
 export const genAI = new GoogleGenerativeAI(API_KEY);
+
+// Log connection status
+if (API_KEY) {
+  console.log(`✅ Gemini AI Connected`);
+  console.log(`🤖 Model: gemini-2.5-flash (default)`);
+} else {
+  console.error(`❌ Gemini AI: API Key not found`);
+}
 
 // System prompt for nutrition AI
 export const SYSTEM_PROMPT = `Bạn là AI Tư Vấn M&M - một chuyên gia dinh dưỡng và ẩm thực thông minh.

@@ -157,29 +157,3 @@ export const getAvailableModels = async (req, res) => {
   }
 };
 
-/**
- * Health check for AI service
- */
-export const healthCheck = async (req, res) => {
-  try {
-    const model = genAI.getGenerativeModel({ model: DEFAULT_MODEL });
-    const result = await model.generateContent("Test");
-    const response = await result.response;
-    
-    return res.status(200).json({
-      status: "connected",
-      success: true,
-      message: "AI service is healthy",
-      modelWorking: true,
-      model: DEFAULT_MODEL,
-    });
-  } catch (error) {
-    return res.status(200).json({
-      status: "error",
-      success: true,
-      message: "AI service is running but model may not be available",
-      modelWorking: false,
-      error: error.message,
-    });
-  }
-};

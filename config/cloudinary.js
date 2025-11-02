@@ -12,6 +12,17 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+const connectCloudinary = async () => {
+  try {
+    await cloudinary.api.ping();
+    console.log("Cloudinary is connected successfully");
+  } catch (error) {
+    console.error("Cloudinary connection error:", error);
+    process.exit(1);
+  }
+};
+
+
 // Cấu hình storage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
@@ -66,27 +77,5 @@ const uploadRecipe = multer({
   }
 });
 
-// Function kiểm tra status
-export const checkCloudinaryStatus = async () => {
-  try {
-    await cloudinary.api.ping();
-    const resources = await cloudinary.api.resources({ 
-      type: 'upload', 
-      prefix: 'Meta-Meal',
-      max_results: 1 
-    });
-    return {
-      status: 'connected',
-      folder: 'Meta-Meal',
-      resources: resources.resources.length,
-      rate_limit_remaining: resources.rate_limit_remaining || 'N/A'
-    };
-  } catch (error) {
-    return {
-      status: 'error',
-      message: error.message
-    };
-  }
-};
 
-export { cloudinary, upload, uploadRecipe };
+export { cloudinary, upload, uploadRecipe, connectCloudinary };
