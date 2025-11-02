@@ -3,7 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import connectDB, { checkDBStatus } from "./config/db.js";
 import { checkCloudinaryStatus } from "./config/cloudinary.js";
-import { checkAIHealth } from "./config/ai.config.js";
+import { checkAIHealth } from "./controllers/ai.controller.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
