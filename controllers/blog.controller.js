@@ -574,3 +574,33 @@ export const getMyBlogs = async (req, res) => {
     });
   }
 };
+
+// @desc    Get top blogs by views (for hero section)
+// @route   GET /api/blogs/top/views
+// @access  Public
+export const getTopBlogsByViews = async (req, res) => {
+  try {
+    const { limit = 3 } = req.query;
+
+    // Get top blogs with highest views, only published blogs
+    const limitNum = parseInt(limit);
+    const blogs = await Blog.find({ published: true })
+      .sort({ views: -1 })
+      .limit(limitNum)
+      .select(
+        "title slug excerpt imageUrl author authorAvatar views publishedAt category tags"
+      );
+
+    res.status(200).json({
+      success: true,
+      data: blogs,
+      count: blogs.length,
+    });
+  } catch (error) {
+    console.error("Get top blogs by views error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Lỗi khi lấy top blog",
+    });
+  }
+};

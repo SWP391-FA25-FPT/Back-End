@@ -9,6 +9,7 @@ import {
   addLike,
   addComment,
   getMyBlogs,
+  getTopBlogsByViews,
 } from "../controllers/blog.controller.js";
 import {
   protect,
@@ -24,6 +25,7 @@ router.get("/my", protect, getMyBlogs);
 
 // Public routes
 router.get("/search", searchBlogs);
+router.get("/top/views", getTopBlogsByViews);
 router.get("/", getAllBlogs);
 router.get("/:id", optionalAuth, getBlogById);
 
