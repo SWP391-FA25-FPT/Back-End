@@ -12,6 +12,7 @@ import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
 import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import blogRoutes from "./routes/blog.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -44,12 +45,22 @@ app.use("/api/subscriptions", subscriptionRoutes);
 // AI routes
 app.use("/api/ai", aiRoutes);
 
+// Blog routes
+app.use("/api/blogs", blogRoutes);
+
 // Status route
 app.get("/", async (req, res) => {
   try {
     console.log("Server is running successfully on huggingface");
+    res.status(200).json({
+      success: true,
+      message: "Server is running successfully",
+    });
   } catch (error) {
-    res.status(503).send(`❌ Error: ${error.message}`);
+    res.status(503).json({
+      success: false,
+      error: error.message,
+    });
   }
 });
 

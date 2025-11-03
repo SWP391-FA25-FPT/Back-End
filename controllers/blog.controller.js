@@ -588,7 +588,7 @@ export const getTopBlogsByViews = async (req, res) => {
       .sort({ views: -1 })
       .limit(limitNum)
       .select(
-        "title slug excerpt imageUrl author authorAvatar views publishedAt category tags"
+        "title slug excerpt imageUrl author authorAvatar views publishedAt category tags createdAt updatedAt"
       );
 
     res.status(200).json({
