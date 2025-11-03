@@ -31,6 +31,7 @@ const BlogSchema = new mongoose.Schema(
     published: { type: Boolean, default: false },
     publishedAt: { type: Date },
     tags: [String],
+    relatedRecipes: [{ type: mongoose.Schema.Types.ObjectId, ref: "Recipe" }],
     likes: [{ type: String }],
     comments: [CommentSchema],
     views: { type: Number, default: 0 },

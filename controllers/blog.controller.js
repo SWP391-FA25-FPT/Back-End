@@ -18,7 +18,15 @@ const generateSlug = (title) => {
 // @access  Private (authenticated users)
 export const createBlog = async (req, res) => {
   try {
-    const { title, excerpt, content, category, tags, published } = req.body;
+    const {
+      title,
+      excerpt,
+      content,
+      category,
+      tags,
+      published,
+      relatedRecipes,
+    } = req.body;
 
     // Validate required fields
     if (!title || !content) {
@@ -42,12 +50,16 @@ export const createBlog = async (req, res) => {
 
     // Get image from uploaded files
     let imageUrl = "";
-    if (req.files && req.files.image && req.files.image[0]) {
-      imageUrl = req.files.image[0].path;
+    if (req.file) {
+      imageUrl = req.file.path;
     }
 
     // Parse JSON fields if they are strings
     const parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
+    const parsedRelatedRecipes =
+      typeof relatedRecipes === "string"
+        ? JSON.parse(relatedRecipes)
+        : relatedRecipes;
 
     // Create blog with author from authenticated user
     const blog = await Blog.create({
@@ -63,10 +75,16 @@ export const createBlog = async (req, res) => {
       published: published || false,
       publishedAt: published ? new Date() : null,
       tags: parsedTags || [],
+      relatedRecipes: parsedRelatedRecipes || [],
       likes: [],
       comments: [],
       views: 0,
     });
+
+    // Populate relatedRecipes after saving
+    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
+      await Blog.populate(blog, { path: "relatedRecipes" });
+    }
 
     res.status(201).json({
       success: true,
@@ -179,6 +197,11 @@ export const getBlogById = async (req, res) => {
     blog.views = (blog.views || 0) + 1;
     await blog.save();
 
+    // Populate relatedRecipes after saving
+    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
+      await Blog.populate(blog, { path: "relatedRecipes" });
+    }
+
     // Check access permissions based on blog status
     if (!blog.published) {
       const userId = req.user?._id;
@@ -232,7 +255,15 @@ export const updateBlog = async (req, res) => {
       });
     }
 
-    const { title, excerpt, content, category, tags, published } = req.body;
+    const {
+      title,
+      excerpt,
+      content,
+      category,
+      tags,
+      published,
+      relatedRecipes,
+    } = req.body;
 
     // Update fields if provided
     if (title) blog.title = title;
@@ -244,6 +275,12 @@ export const updateBlog = async (req, res) => {
     if (tags) {
       blog.tags = typeof tags === "string" ? JSON.parse(tags) : tags;
     }
+    if (relatedRecipes !== undefined) {
+      blog.relatedRecipes =
+        typeof relatedRecipes === "string"
+          ? JSON.parse(relatedRecipes)
+          : relatedRecipes;
+    }
 
     // Update published status
     if (published !== undefined) {
@@ -254,7 +291,7 @@ export const updateBlog = async (req, res) => {
     }
 
     // Update image if uploaded
-    if (req.files && req.files.image && req.files.image[0]) {
+    if (req.file) {
       // Delete old image from Cloudinary if it exists
       if (blog.imageUrl && blog.imageUrl.includes("cloudinary.com")) {
         try {
@@ -269,10 +306,15 @@ export const updateBlog = async (req, res) => {
         }
       }
 
-      blog.imageUrl = req.files.image[0].path;
+      blog.imageUrl = req.file.path;
     }
 
     await blog.save();
+
+    // Populate relatedRecipes after saving
+    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
+      await Blog.populate(blog, { path: "relatedRecipes" });
+    }
 
     res.status(200).json({
       success: true,
