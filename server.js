@@ -12,6 +12,7 @@ import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
 import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import blogRoutes from "./routes/blog.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -33,6 +34,7 @@ app.use("/api/user", userRoutes);
 app.use("/api/recipes", recipeRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/user/history", userHistoryRoutes);
+app.use("/api/blogs", blogRoutes);
 
 // Comment and Rating routes
 app.use("/api/comments", commentDeleteRouter);
