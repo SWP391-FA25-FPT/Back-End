@@ -34,7 +34,6 @@ app.use("/api/user", userRoutes);
 app.use("/api/recipes", recipeRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/user/history", userHistoryRoutes);
-app.use("/api/blogs", blogRoutes);
 
 // Comment and Rating routes
 app.use("/api/comments", commentDeleteRouter);
