@@ -1,7 +1,7 @@
-import { v2 as cloudinary } from 'cloudinary';
-import { CloudinaryStorage } from 'multer-storage-cloudinary';
-import multer from 'multer';
-import dotenv from 'dotenv';
+import { v2 as cloudinary } from "cloudinary";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
+import multer from "multer";
+import dotenv from "dotenv";
 
 dotenv.config();
 
@@ -22,32 +22,32 @@ const connectCloudinary = async () => {
   }
 };
 
-
 // Cấu hình storage
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: "Meta-Meal",
     allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
-    transformation: [{ width: 1000, height: 1000, crop: "limit" }]
-  }
+    transformation: [{ width: 1000, height: 1000, crop: "limit" }],
+  },
 });
 
 // Cấu hình upload với giới hạn
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const isValid = allowedTypes.test(file.originalname.toLowerCase()) && 
-                    allowedTypes.test(file.mimetype);
-    
+    const isValid =
+      allowedTypes.test(file.originalname.toLowerCase()) &&
+      allowedTypes.test(file.mimetype);
+
     if (isValid) {
       cb(null, true);
     } else {
       cb(new Error("Chỉ cho phép upload file ảnh (JPEG, JPG, PNG, GIF, WEBP)"));
     }
-  }
+  },
 });
 
 // Cấu hình storage riêng cho recipes
@@ -56,8 +56,8 @@ const recipeStorage = new CloudinaryStorage({
   params: {
     folder: "Meta-Meal/recipes",
     allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
-    transformation: [{ width: 1200, height: 1200, crop: "limit" }]
-  }
+    transformation: [{ width: 1200, height: 1200, crop: "limit" }],
+  },
 });
 
 // Cấu hình upload cho recipes với nhiều ảnh
@@ -66,16 +66,44 @@ const uploadRecipe = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|gif|webp/;
-    const isValid = allowedTypes.test(file.originalname.toLowerCase()) && 
-                    allowedTypes.test(file.mimetype);
-    
+    const isValid =
+      allowedTypes.test(file.originalname.toLowerCase()) &&
+      allowedTypes.test(file.mimetype);
+
     if (isValid) {
       cb(null, true);
     } else {
       cb(new Error("Chỉ cho phép upload file ảnh (JPEG, JPG, PNG, GIF, WEBP)"));
     }
-  }
+  },
 });
 
+// Cấu hình storage riêng cho blogs
+const blogStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "Meta-Meal/blogs",
+    allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
+    transformation: [{ width: 1200, height: 1200, crop: "limit" }],
+  },
+});
 
-export { cloudinary, upload, uploadRecipe, connectCloudinary };
+// Cấu hình upload cho blogs
+const uploadBlog = multer({
+  storage: blogStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const isValid =
+      allowedTypes.test(file.originalname.toLowerCase()) &&
+      allowedTypes.test(file.mimetype);
+
+    if (isValid) {
+      cb(null, true);
+    } else {
+      cb(new Error("Chỉ cho phép upload file ảnh (JPEG, JPG, PNG, GIF, WEBP)"));
+    }
+  },
+});
+
+export { cloudinary, upload, uploadRecipe, uploadBlog, connectCloudinary };
