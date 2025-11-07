@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import UserHistory from '../models/UserHistory.js';
 import Recipe from '../models/Recipe.js';
 
@@ -25,28 +26,28 @@ export const addViewHistory = async (req, res) => {
       });
     }
 
-    // Kiểm tra xem user đã xem recipe này trong vòng 1 giờ chưa (tránh duplicate)
-    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-    const existingView = await UserHistory.findOne({
+    // Tìm tất cả records cũ của recipe này (để tránh duplicate)
+    // Chỉ giữ lại 1 record duy nhất cho mỗi recipe
+    const existingViews = await UserHistory.find({
       userId,
-      recipeId,
-      viewedAt: { $gte: oneHourAgo }
+      recipeId
     });
 
-    if (existingView) {
-      // Cập nhật thời gian xem
-      existingView.viewedAt = Date.now();
-      existingView.device = device;
-      await existingView.save();
-    } else {
-      // Tạo record mới
-      await UserHistory.create({
+    if (existingViews.length > 0) {
+      // Nếu đã có record, xóa tất cả và tạo mới (để đưa lên đầu với thời gian mới nhất)
+      await UserHistory.deleteMany({
         userId,
-        recipeId,
-        device,
-        viewedAt: Date.now()
+        recipeId
       });
     }
+
+    // Tạo record mới với thời gian hiện tại
+    await UserHistory.create({
+      userId,
+      recipeId,
+      device,
+      viewedAt: Date.now()
+    });
 
     // Giới hạn lịch sử của user ở 50 items gần nhất
     const historyCount = await UserHistory.countDocuments({ userId });
@@ -90,30 +91,55 @@ export const getRecentViewed = async (req, res) => {
     const { limit = 20 } = req.query;
     const limitNum = parseInt(limit);
 
-    // Lấy lịch sử xem của user
-    const history = await UserHistory.find({ userId })
-      .sort({ viewedAt: -1 })
-      .limit(limitNum)
+    // Lấy lịch sử xem của user, group by recipeId để tránh duplicate
+    // Sử dụng aggregation để lấy mỗi recipe một lần với viewedAt mới nhất
+    const historyAggregation = await UserHistory.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(userId) } },
+      { $sort: { viewedAt: -1 } },
+      {
+        $group: {
+          _id: '$recipeId',
+          viewedAt: { $first: '$viewedAt' },
+          device: { $first: '$device' },
+          historyId: { $first: '$_id' }
+        }
+      },
+      { $sort: { viewedAt: -1 } },
+      { $limit: limitNum }
+    ]);
+
+    // Populate recipe info
+    const historyIds = historyAggregation.map(item => item.historyId);
+    const history = await UserHistory.find({ _id: { $in: historyIds } })
       .populate({
         path: 'recipeId',
         select: 'name author image totalTime servings tags views'
-      });
+      })
+      .sort({ viewedAt: -1 });
 
-    // Filter ra các recipe đã bị xóa
+    // Filter ra các recipe đã bị xóa và format response
     const validHistory = history.filter(item => item.recipeId !== null);
 
-    // Format response
-    const recentRecipes = validHistory.map(item => ({
-      _id: item.recipeId._id,
-      name: item.recipeId.name,
-      author: item.recipeId.author,
-      image: item.recipeId.image,
-      totalTime: item.recipeId.totalTime,
-      servings: item.recipeId.servings,
-      tags: item.recipeId.tags,
-      views: item.recipeId.views,
-      viewedAt: item.viewedAt
-    }));
+    // Format response - đảm bảo mỗi recipe chỉ xuất hiện 1 lần
+    const recipeMap = new Map();
+    validHistory.forEach(item => {
+      const recipeId = item.recipeId._id.toString();
+      if (!recipeMap.has(recipeId)) {
+        recipeMap.set(recipeId, {
+          _id: item.recipeId._id,
+          name: item.recipeId.name,
+          author: item.recipeId.author,
+          image: item.recipeId.image,
+          totalTime: item.recipeId.totalTime,
+          servings: item.recipeId.servings,
+          tags: item.recipeId.tags,
+          views: item.recipeId.views,
+          viewedAt: item.viewedAt
+        });
+      }
+    });
+
+    const recentRecipes = Array.from(recipeMap.values());
 
     res.status(200).json({
       success: true,

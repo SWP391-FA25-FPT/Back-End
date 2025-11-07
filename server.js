@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import connectDB, { checkDBStatus } from "./config/db.js";
-import { checkCloudinaryStatus } from "./config/cloudinary.js";
+import connectDB from "./config/db.js";
+import { connectCloudinary } from "./config/cloudinary.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
@@ -12,12 +12,14 @@ import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
 import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import mealplanRoutes from "./routes/mealplan.routes.js";
 
 // Load environment variables
 dotenv.config();
 
 // Connect to database
 connectDB();
+connectCloudinary();
 
 const app = express();
 
@@ -43,36 +45,13 @@ app.use("/api/subscriptions", subscriptionRoutes);
 // AI routes
 app.use("/api/ai", aiRoutes);
 
+// Meal plan routes
+app.use("/api/mealplans", mealplanRoutes);
+
 // Status route
 app.get("/", async (req, res) => {
   try {
-    const dbStatus = checkDBStatus();
-    const cloudinaryStatus = await checkCloudinaryStatus();
-
-    const allHealthy =
-      dbStatus.status === "connected" &&
-      cloudinaryStatus.status === "connected";
-
-    const statusEmoji = allHealthy ? "✅" : "⚠️";
-
-    res.send(`<pre>
-${statusEmoji} Meta-Meal API Status
-
-Time: ${new Date().toLocaleString()}
-
---- Database (MongoDB) ---
-Status: ${dbStatus.status === "connected" ? "✅" : "❌"} ${dbStatus.status}
-Host: ${dbStatus.host}
-Database: ${dbStatus.database}
-
---- Cloudinary ---
-Status: ${cloudinaryStatus.status === "connected" ? "✅" : "❌"} ${
-      cloudinaryStatus.status
-    }
-Folder: ${cloudinaryStatus.folder || "N/A"}
-Resources: ${cloudinaryStatus.resources || "N/A"}
-Rate Limit: ${cloudinaryStatus.rate_limit_remaining || "N/A"}
-</pre>`);
+    console.log("Server is running successfully on huggingface");
   } catch (error) {
     res.status(503).send(`❌ Error: ${error.message}`);
   }
