@@ -12,9 +12,14 @@ import {
 /**
  * Chat with AI - Main endpoint
  */
+import { upsertChatMessage, listRecentMessages, listUserConversations, getConversationMessages } from "../utils/qdrant.js";
+
 export const chatWithAI = async (req, res) => {
   try {
-    const { message, conversationHistory = [] } = req.body;
+    const { message, conversationHistory = [], conversationId: clientConversationId } = req.body;
+
+    const userId = req.user?._id?.toString();
+    const conversationId = clientConversationId || (userId ? `${userId}-${Date.now()}` : `guest-${Date.now()}`);
 
     if (!message || !message.trim()) {
       return res.status(400).json({
@@ -63,6 +68,19 @@ export const chatWithAI = async (req, res) => {
               parts: [{ text: msg.content }],
             });
           });
+        } else if (userId && conversationId) {
+          // If client didn't send history, try load recent messages from Qdrant
+          try {
+            const recent = await listRecentMessages({ conversationId, limit: 30 });
+            recent.forEach((msg) => {
+              history.push({
+                role: msg.role === "user" ? "user" : "model",
+                parts: [{ text: msg.content }],
+              });
+            });
+          } catch (loadErr) {
+            console.warn("Qdrant load history warning:", loadErr?.message || loadErr);
+          }
         }
 
         // Create chat
@@ -75,6 +93,28 @@ export const chatWithAI = async (req, res) => {
         const result = await chat.sendMessage(message);
         const response = await result.response;
         aiResponse = response.text();
+
+        // Persist user & AI messages to Qdrant (best-effort)
+        try {
+          if (userId) {
+            await upsertChatMessage({
+              userId,
+              conversationId,
+              role: "user",
+              content: message,
+              timestamp: new Date().toISOString(),
+            });
+            await upsertChatMessage({
+              userId,
+              conversationId,
+              role: "ai",
+              content: aiResponse,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (persistErr) {
+          console.warn("Qdrant persist warning:", persistErr?.response?.data || persistErr?.message || persistErr);
+        }
 
         console.log(`✅ Success with model: ${modelName}`);
         break; // Success, exit loop
@@ -92,6 +132,7 @@ export const chatWithAI = async (req, res) => {
         data: {
           message: aiResponse,
           timestamp: new Date().toISOString(),
+          conversationId,
         },
       });
     }
@@ -154,6 +195,44 @@ export const getAvailableModels = async (req, res) => {
       success: false,
       error: error.message,
     });
+  }
+};
+
+/**
+ * List conversations for current user (Qdrant-backed)
+ */
+export const getMyConversations = async (req, res) => {
+  try {
+    const userId = req.user?._id?.toString();
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authorized" });
+    }
+    const list = await listUserConversations({ userId, limit: 1000 });
+    return res.status(200).json({ success: true, data: list });
+  } catch (error) {
+    console.error("Get my conversations error:", error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * Get messages for a conversation (Qdrant-backed)
+ */
+export const getConversationHistory = async (req, res) => {
+  try {
+    const userId = req.user?._id?.toString();
+    const { conversationId } = req.params;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: "Not authorized" });
+    }
+    if (!conversationId) {
+      return res.status(400).json({ success: false, error: "conversationId is required" });
+    }
+    const messages = await getConversationMessages({ userId, conversationId, limit: 2000 });
+    return res.status(200).json({ success: true, data: messages });
+  } catch (error) {
+    console.error("Get conversation history error:", error);
+    return res.status(500).json({ success: false, error: error.message });
   }
 };
 
