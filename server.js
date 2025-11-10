@@ -12,6 +12,7 @@ import commentRoutes, { commentDeleteRouter } from "./routes/comment.routes.js";
 import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
+import mealplanRoutes from "./routes/mealplan.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
 
 // Load environment variables
@@ -44,6 +45,9 @@ app.use("/api/subscriptions", subscriptionRoutes);
 
 // AI routes
 app.use("/api/ai", aiRoutes);
+
+// Meal plan routes
+app.use("/api/mealplans", mealplanRoutes);
 
 // Blog routes
 app.use("/api/blogs", blogRoutes);

@@ -1,5 +1,4 @@
-const { Instagram } = require('lucide-react');
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const IngredientSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -33,4 +32,6 @@ const MealPlanSchema = new mongoose.Schema({
   targetCalories: { type: Number, required: true },
 });
 
-module.exports = mongoose.models.MealPlan || mongoose.model('MealPlan', MealPlanSchema);
+const MealPlan = mongoose.models.MealPlan || mongoose.model('MealPlan', MealPlanSchema);
+
+export default MealPlan;

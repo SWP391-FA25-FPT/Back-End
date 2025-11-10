@@ -8,6 +8,16 @@ import {
   DEFAULT_MODEL,
   ERROR_MESSAGES,
 } from "../config/ai.config.js";
+import {
+  genAI,
+  API_KEY,
+  SYSTEM_PROMPT,
+  INITIAL_AI_RESPONSE,
+  MODELS_TO_TRY,
+  GENERATION_CONFIG,
+  DEFAULT_MODEL,
+  ERROR_MESSAGES,
+} from "../config/ai.config.js";
 
 /**
  * Chat with AI - Main endpoint
@@ -29,6 +39,7 @@ export const chatWithAI = async (req, res) => {
     }
 
     // List of models to try - Using actual available models from API
+    const modelsToTry = MODELS_TO_TRY;
     const modelsToTry = MODELS_TO_TRY;
 
     let lastError = null;
@@ -54,6 +65,7 @@ export const chatWithAI = async (req, res) => {
             role: "model",
             parts: [
               {
+                text: INITIAL_AI_RESPONSE,
                 text: INITIAL_AI_RESPONSE,
               },
             ],
@@ -86,6 +98,7 @@ export const chatWithAI = async (req, res) => {
         // Create chat
         const chat = model.startChat({
           history: history,
+          generationConfig: GENERATION_CONFIG,
           generationConfig: GENERATION_CONFIG,
         });
 
@@ -142,12 +155,16 @@ export const chatWithAI = async (req, res) => {
 
     // Handle specific errors
     let errorMessage = ERROR_MESSAGES.default;
+    let errorMessage = ERROR_MESSAGES.default;
 
     if (lastError?.message?.includes("API key") || lastError?.message?.includes("403")) {
       errorMessage = ERROR_MESSAGES.apiKey;
+      errorMessage = ERROR_MESSAGES.apiKey;
     } else if (lastError?.message?.includes("quota") || lastError?.message?.includes("429")) {
       errorMessage = ERROR_MESSAGES.quota;
+      errorMessage = ERROR_MESSAGES.quota;
     } else if (lastError?.message?.includes("404") || lastError?.message?.includes("not found")) {
+      errorMessage = ERROR_MESSAGES.modelNotFound;
       errorMessage = ERROR_MESSAGES.modelNotFound;
     }
 
@@ -160,6 +177,7 @@ export const chatWithAI = async (req, res) => {
     console.error("Chat with AI error:", error);
     return res.status(500).json({
       success: false,
+      error: ERROR_MESSAGES.serverError,
       error: ERROR_MESSAGES.serverError,
     });
   }
