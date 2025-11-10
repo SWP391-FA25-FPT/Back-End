@@ -8,28 +8,29 @@ import {
   DEFAULT_MODEL,
   ERROR_MESSAGES,
 } from "../config/ai.config.js";
-import {
-  genAI,
-  API_KEY,
-  SYSTEM_PROMPT,
-  INITIAL_AI_RESPONSE,
-  MODELS_TO_TRY,
-  GENERATION_CONFIG,
-  DEFAULT_MODEL,
-  ERROR_MESSAGES,
-} from "../config/ai.config.js";
 
 /**
  * Chat with AI - Main endpoint
  */
-import { upsertChatMessage, listRecentMessages, listUserConversations, getConversationMessages } from "../utils/qdrant.js";
+import {
+  upsertChatMessage,
+  listRecentMessages,
+  listUserConversations,
+  getConversationMessages,
+} from "../utils/qdrant.js";
 
 export const chatWithAI = async (req, res) => {
   try {
-    const { message, conversationHistory = [], conversationId: clientConversationId } = req.body;
+    const {
+      message,
+      conversationHistory = [],
+      conversationId: clientConversationId,
+    } = req.body;
 
     const userId = req.user?._id?.toString();
-    const conversationId = clientConversationId || (userId ? `${userId}-${Date.now()}` : `guest-${Date.now()}`);
+    const conversationId =
+      clientConversationId ||
+      (userId ? `${userId}-${Date.now()}` : `guest-${Date.now()}`);
 
     if (!message || !message.trim()) {
       return res.status(400).json({
@@ -39,7 +40,6 @@ export const chatWithAI = async (req, res) => {
     }
 
     // List of models to try - Using actual available models from API
-    const modelsToTry = MODELS_TO_TRY;
     const modelsToTry = MODELS_TO_TRY;
 
     let lastError = null;
@@ -83,7 +83,10 @@ export const chatWithAI = async (req, res) => {
         } else if (userId && conversationId) {
           // If client didn't send history, try load recent messages from Qdrant
           try {
-            const recent = await listRecentMessages({ conversationId, limit: 30 });
+            const recent = await listRecentMessages({
+              conversationId,
+              limit: 30,
+            });
             recent.forEach((msg) => {
               history.push({
                 role: msg.role === "user" ? "user" : "model",
@@ -91,7 +94,10 @@ export const chatWithAI = async (req, res) => {
               });
             });
           } catch (loadErr) {
-            console.warn("Qdrant load history warning:", loadErr?.message || loadErr);
+            console.warn(
+              "Qdrant load history warning:",
+              loadErr?.message || loadErr
+            );
           }
         }
 
@@ -126,7 +132,10 @@ export const chatWithAI = async (req, res) => {
             });
           }
         } catch (persistErr) {
-          console.warn("Qdrant persist warning:", persistErr?.response?.data || persistErr?.message || persistErr);
+          console.warn(
+            "Qdrant persist warning:",
+            persistErr?.response?.data || persistErr?.message || persistErr
+          );
         }
 
         console.log(`✅ Success with model: ${modelName}`);
@@ -155,15 +164,23 @@ export const chatWithAI = async (req, res) => {
 
     // Handle specific errors
     let errorMessage = ERROR_MESSAGES.default;
-    let errorMessage = ERROR_MESSAGES.default;
 
-    if (lastError?.message?.includes("API key") || lastError?.message?.includes("403")) {
+    if (
+      lastError?.message?.includes("API key") ||
+      lastError?.message?.includes("403")
+    ) {
       errorMessage = ERROR_MESSAGES.apiKey;
       errorMessage = ERROR_MESSAGES.apiKey;
-    } else if (lastError?.message?.includes("quota") || lastError?.message?.includes("429")) {
+    } else if (
+      lastError?.message?.includes("quota") ||
+      lastError?.message?.includes("429")
+    ) {
       errorMessage = ERROR_MESSAGES.quota;
       errorMessage = ERROR_MESSAGES.quota;
-    } else if (lastError?.message?.includes("404") || lastError?.message?.includes("not found")) {
+    } else if (
+      lastError?.message?.includes("404") ||
+      lastError?.message?.includes("not found")
+    ) {
       errorMessage = ERROR_MESSAGES.modelNotFound;
       errorMessage = ERROR_MESSAGES.modelNotFound;
     }
@@ -171,7 +188,8 @@ export const chatWithAI = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: errorMessage,
-      details: process.env.NODE_ENV === "development" ? lastError?.message : undefined,
+      details:
+        process.env.NODE_ENV === "development" ? lastError?.message : undefined,
     });
   } catch (error) {
     console.error("Chat with AI error:", error);
@@ -244,13 +262,18 @@ export const getConversationHistory = async (req, res) => {
       return res.status(401).json({ success: false, error: "Not authorized" });
     }
     if (!conversationId) {
-      return res.status(400).json({ success: false, error: "conversationId is required" });
+      return res
+        .status(400)
+        .json({ success: false, error: "conversationId is required" });
     }
-    const messages = await getConversationMessages({ userId, conversationId, limit: 2000 });
+    const messages = await getConversationMessages({
+      userId,
+      conversationId,
+      limit: 2000,
+    });
     return res.status(200).json({ success: true, data: messages });
   } catch (error) {
     console.error("Get conversation history error:", error);
     return res.status(500).json({ success: false, error: error.message });
   }
 };
-
