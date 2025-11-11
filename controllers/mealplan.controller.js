@@ -1,12 +1,25 @@
 import MealPlan from '../models/MealPlan.js';
 import Recipe from '../models/Recipe.js';
 import User from '../models/User.model.js';
+import Goal from '../models/Goal.js';
 
 // Helper function to calculate BMR and daily calories
-const calculateDailyCalories = (profile) => {
+// @param {Object} profile - User profile with weight, height, age, gender, workHabits
+// @param {String} userId - User ID (optional)
+// @param {Boolean} useGoalCalories - If true, use goal's target calories instead of BMR (default: false)
+const calculateDailyCalories = async (profile, userId = null, useGoalCalories = false) => {
   const { weight, height, age, gender, workHabits } = profile;
   
-  // Calculate BMR using Mifflin-St Jeor Equation
+  // Check if user wants to use goal-based calories (for tracking page)
+  if (useGoalCalories && userId) {
+    const activeGoal = await Goal.findOne({ userId, status: 'active' });
+    if (activeGoal && activeGoal.targetCaloriesPerDay) {
+      console.log(`Using goal-based calories: ${activeGoal.targetCaloriesPerDay} cal/day`);
+      return activeGoal.targetCaloriesPerDay;
+    }
+  }
+  
+  // Calculate BMR using Mifflin-St Jeor Equation (for meal plan page)
   const bmr = gender.toLowerCase() === 'male'
     ? 10 * weight + 6.25 * height - 5 * age + 5
     : 10 * weight + 6.25 * height - 5 * age - 161;
@@ -23,6 +36,7 @@ const calculateDailyCalories = (profile) => {
   const normalizedWorkHabits = workHabits.toLowerCase();
   const dailyCalories = Math.round(bmr * (activityMultipliers[normalizedWorkHabits] || 1.2));
   
+  console.log(`Using BMR-based calories: ${dailyCalories} cal/day`);
   return dailyCalories;
 };
 
@@ -39,9 +53,19 @@ const mealsMap = {
 // @access  Private
 export const getMealPlans = async (req, res) => {
   try {
-    const { date, startDate, endDate } = req.query;
+    const { date, startDate, endDate, forGoal } = req.query;
     
     let query = { userId: req.user._id };
+    
+    // NEW: Filter by meal plan type
+    // forGoal = 'true' -> Get goal-based meal plans (Tracking Page)
+    // forGoal = 'false' -> Get health-based meal plans (Meal Plan Page)
+    // forGoal = undefined -> Get all meal plans
+    if (forGoal === 'true') {
+      query.goalId = { $ne: null }; // Has goalId
+    } else if (forGoal === 'false') {
+      query.goalId = null; // No goalId (health-based)
+    }
     
     if (date) {
       // Single date query
@@ -96,7 +120,7 @@ export const getMealPlans = async (req, res) => {
 // @access  Private
 export const generateMealPlan = async (req, res) => {
   try {
-    const { date } = req.body;
+    const { date, useGoalCalories = false, goalId = null } = req.body;
     
     if (!date) {
       return res.status(400).json({
@@ -115,7 +139,7 @@ export const generateMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
+    const { weight, height, age, gender, workHabits, meals, diet, allergies, eatingHabits } = user.profile;
     
     // Validate required profile fields
     const missingFields = [];
@@ -134,7 +158,9 @@ export const generateMealPlan = async (req, res) => {
     }
     
     // Calculate daily calories
-    const dailyCalories = calculateDailyCalories(user.profile);
+    // useGoalCalories = true: Use goal-based calories (Tracking Page)
+    // useGoalCalories = false: Use BMR-based calories (Meal Plan Page)
+    const dailyCalories = await calculateDailyCalories(user.profile, req.user._id, useGoalCalories);
     
     // Map meal preferences to meal types
     const mealTypes = meals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
@@ -146,21 +172,47 @@ export const generateMealPlan = async (req, res) => {
       ? { 'ingredients.name': { $nin: allergies } }
       : {};
     
-    // Fetch recipes for each meal type
+    // Calculate calories per meal based on eating habits
+    const caloriesPerMeal = Math.round(dailyCalories / meals.length);
+    
+    // Determine dishes per meal based on eating habits and calories
+    const getDishesPerMeal = (eatingHabit, mealCalories) => {
+      // Heavy eaters or high calorie meals -> 2 dishes
+      if (eatingHabit === 'heavy' || mealCalories > 600) {
+        return 2;
+      }
+      // Light eaters or low calorie meals -> 1 dish
+      if (eatingHabit === 'light' || mealCalories < 400) {
+        return 1;
+      }
+      // Snackers -> prefer more smaller dishes
+      if (eatingHabit === 'snacker') {
+        return mealCalories > 500 ? 2 : 1;
+      }
+      // Moderate eaters -> 1-2 dishes based on calories
+      return mealCalories > 500 ? 2 : 1;
+    };
+    
+    // Fetch recipes for each meal type with smart dish count
     const mealPlans = [];
-    const recipesPerMeal = 2;
     
     for (let i = 0; i < mealTypes.length; i++) {
       const mealType = mealTypes[i];
       const mealTag = mealTags[i];
+      const targetMealCalories = caloriesPerMeal;
+      
+      // Determine how many dishes for this meal
+      const dishesCount = getDishesPerMeal(eatingHabits || 'moderate', targetMealCalories);
+      const caloriesPerDish = Math.round(targetMealCalories / dishesCount);
       
       // Query recipes with case-insensitive tag matching
       const normalizedTag = mealTag.toLowerCase();
       const tagQuery = { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') }, status: 'published' };
       
+      // Fetch more recipes to find ones with appropriate calorie range
       const recipesForMealType = await Recipe.aggregate([
         { $match: { ...dietQuery, ...allergiesQuery, ...tagQuery } },
-        { $sample: { size: recipesPerMeal } }
+        { $sample: { size: Math.min(10, dishesCount * 3) } } // Get multiple options
       ]);
       
       if (recipesForMealType.length === 0) {
@@ -170,8 +222,20 @@ export const generateMealPlan = async (req, res) => {
         });
       }
       
+      // Sort recipes by how close their calories are to target per dish
+      const sortedRecipes = recipesForMealType.sort((a, b) => {
+        const aCalories = a.nutrition?.calories || 0;
+        const bCalories = b.nutrition?.calories || 0;
+        const aDiff = Math.abs(aCalories - caloriesPerDish);
+        const bDiff = Math.abs(bCalories - caloriesPerDish);
+        return aDiff - bDiff;
+      });
+      
+      // Select the best matching recipes
+      const selectedRecipes = sortedRecipes.slice(0, dishesCount);
+      
       // Add recipes to meal plan
-      for (const recipe of recipesForMealType) {
+      for (const recipe of selectedRecipes) {
         mealPlans.push({
           type: mealType,
           recipeId: recipe._id,
@@ -199,23 +263,43 @@ export const generateMealPlan = async (req, res) => {
       { protein: 0, carbs: 0, fat: 0 }
     );
     
-    // Create meal plan
-    const mealPlan = await MealPlan.create({
-      userId: req.user._id,
-      date: new Date(date),
-      meals: mealPlans,
-      totalCalories,
-      totalMacros,
-      targetCalories: dailyCalories
-    });
+    // Check if meal plan already exists for this date and goalId
+    const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
     
-    // Populate recipe details
-    const populatedMealPlan = await MealPlan.findById(mealPlan._id)
-      .populate('meals.recipeId', 'name image description');
+    const query = {
+      userId: req.user._id,
+      date: {
+        $gte: targetDate,
+        $lt: nextDay
+      }
+    };
+    
+    // CRITICAL: Filter by goalId to separate goal-based and health-based meal plans
+    if (goalId) {
+      query.goalId = goalId; // Find goal-based meal plan
+    } else {
+      query.goalId = null; // Find health-based meal plan
+    }
+    
+    // Use findOneAndUpdate with upsert to avoid duplicates
+    const mealPlan = await MealPlan.findOneAndUpdate(
+      query,
+      {
+        goalId, // Save goalId to distinguish goal-based vs health-based meal plans
+        meals: mealPlans,
+        totalCalories,
+        totalMacros,
+        targetCalories: dailyCalories
+      },
+      { new: true, upsert: true } // Create if not found, update if exists
+    ).populate('meals.recipeId', 'name image description');
     
     res.status(201).json({
       success: true,
-      data: populatedMealPlan
+      data: mealPlan
     });
   } catch (error) {
     console.error('Generate meal plan error:', error);
@@ -232,7 +316,7 @@ export const generateMealPlan = async (req, res) => {
 // @access  Private
 export const regenerateMealPlan = async (req, res) => {
   try {
-    const { date } = req.body;
+    const { date, useGoalCalories = false, goalId = null } = req.body;
     
     if (!date) {
       return res.status(400).json({
@@ -251,10 +335,12 @@ export const regenerateMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
+    const { weight, height, age, gender, workHabits, meals, diet, allergies, eatingHabits } = user.profile;
     
     // Calculate daily calories
-    const dailyCalories = calculateDailyCalories(user.profile);
+    // useGoalCalories = true: Use goal-based calories (Tracking Page)
+    // useGoalCalories = false: Use BMR-based calories (Meal Plan Page)
+    const dailyCalories = await calculateDailyCalories(user.profile, req.user._id, useGoalCalories);
     
     // Use default meals if not set
     const userMeals = meals && meals.length > 0 ? meals : ['breakfast', 'lunch', 'dinner'];
@@ -267,20 +353,40 @@ export const regenerateMealPlan = async (req, res) => {
       ? { 'ingredients.name': { $nin: allergies } }
       : {};
     
-    // Fetch new recipes
+    // Calculate calories per meal
+    const caloriesPerMeal = Math.round(dailyCalories / userMeals.length);
+    
+    // Determine dishes per meal based on eating habits and calories
+    const getDishesPerMeal = (eatingHabit, mealCalories) => {
+      if (eatingHabit === 'heavy' || mealCalories > 600) {
+        return 2;
+      }
+      if (eatingHabit === 'light' || mealCalories < 400) {
+        return 1;
+      }
+      if (eatingHabit === 'snacker') {
+        return mealCalories > 500 ? 2 : 1;
+      }
+      return mealCalories > 500 ? 2 : 1;
+    };
+    
+    // Fetch new recipes with smart dish count
     const newMeals = [];
-    const recipesPerMeal = 2;
     
     for (let i = 0; i < mealTypes.length; i++) {
       const mealType = mealTypes[i];
       const mealTag = mealTags[i];
+      const targetMealCalories = caloriesPerMeal;
+      
+      const dishesCount = getDishesPerMeal(eatingHabits || 'moderate', targetMealCalories);
+      const caloriesPerDish = Math.round(targetMealCalories / dishesCount);
       
       const normalizedTag = mealTag.toLowerCase();
       const tagQuery = { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') }, status: 'published' };
       
       const recipesForMealType = await Recipe.aggregate([
         { $match: { ...dietQuery, ...allergiesQuery, ...tagQuery } },
-        { $sample: { size: recipesPerMeal } }
+        { $sample: { size: Math.min(10, dishesCount * 3) } }
       ]);
       
       if (recipesForMealType.length === 0) {
@@ -290,8 +396,18 @@ export const regenerateMealPlan = async (req, res) => {
         });
       }
       
-      // Use only the first recipe
-      for (const recipe of recipesForMealType.slice(0, 1)) {
+      // Sort by calorie proximity to target
+      const sortedRecipes = recipesForMealType.sort((a, b) => {
+        const aCalories = a.nutrition?.calories || 0;
+        const bCalories = b.nutrition?.calories || 0;
+        const aDiff = Math.abs(aCalories - caloriesPerDish);
+        const bDiff = Math.abs(bCalories - caloriesPerDish);
+        return aDiff - bDiff;
+      });
+      
+      const selectedRecipes = sortedRecipes.slice(0, dishesCount);
+      
+      for (const recipe of selectedRecipes) {
         newMeals.push({
           type: mealType,
           recipeId: recipe._id,
@@ -319,25 +435,39 @@ export const regenerateMealPlan = async (req, res) => {
       { protein: 0, carbs: 0, fat: 0 }
     );
     
-    // Find and update existing meal plan
+    // Find and update existing meal plan (must match goalId to avoid cross-contamination)
     const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(targetDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+    
+    // Build query to find meal plan with matching goalId
+    const query = {
+      userId: req.user._id,
+      date: {
+        $gte: targetDate,
+        $lt: nextDay
+      }
+    };
+    
+    // CRITICAL: Filter by goalId to separate goal-based and health-based meal plans
+    if (goalId) {
+      query.goalId = goalId; // Find goal-based meal plan
+    } else {
+      query.goalId = null; // Find health-based meal plan
+    }
+    
     const mealPlan = await MealPlan.findOneAndUpdate(
-      { userId: req.user._id, date: targetDate },
+      query,
       {
+        goalId, // Update goalId
         meals: newMeals,
         totalCalories,
         totalMacros,
         targetCalories: dailyCalories
       },
-      { new: true }
+      { new: true, upsert: true } // Create if not found
     ).populate('meals.recipeId', 'name image description');
-    
-    if (!mealPlan) {
-      return res.status(404).json({
-        success: false,
-        error: 'Không tìm thấy kế hoạch bữa ăn cho ngày này'
-      });
-    }
     
     res.status(200).json({
       success: true,
@@ -358,7 +488,7 @@ export const regenerateMealPlan = async (req, res) => {
 // @access  Private
 export const generateWeeklyMealPlan = async (req, res) => {
   try {
-    const { startDate } = req.body;
+    const { startDate, useGoalCalories = false } = req.body;
     
     if (!startDate) {
       return res.status(400).json({
@@ -377,7 +507,7 @@ export const generateWeeklyMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
+    const { weight, height, age, gender, workHabits, meals, diet, allergies, eatingHabits } = user.profile;
     
     // Validate required fields
     const missingFields = [];
@@ -396,7 +526,9 @@ export const generateWeeklyMealPlan = async (req, res) => {
     }
     
     // Calculate daily calories
-    const dailyCalories = calculateDailyCalories(user.profile);
+    // useGoalCalories = true: Use goal-based calories (Tracking Page)
+    // useGoalCalories = false: Use BMR-based calories (Meal Plan Page)
+    const dailyCalories = await calculateDailyCalories(user.profile, req.user._id, useGoalCalories);
     
     // Map meal preferences
     const mealTypes = meals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
@@ -408,23 +540,44 @@ export const generateWeeklyMealPlan = async (req, res) => {
       ? { 'ingredients.name': { $nin: allergies } }
       : {};
     
-    // Pre-fetch recipes for each meal type
+    // Calculate calories per meal
+    const caloriesPerMeal = Math.round(dailyCalories / meals.length);
+    
+    // Determine dishes per meal based on eating habits
+    const getDishesPerMeal = (eatingHabit, mealCalories) => {
+      if (eatingHabit === 'heavy' || mealCalories > 600) {
+        return 2;
+      }
+      if (eatingHabit === 'light' || mealCalories < 400) {
+        return 1;
+      }
+      if (eatingHabit === 'snacker') {
+        return mealCalories > 500 ? 2 : 1;
+      }
+      return mealCalories > 500 ? 2 : 1;
+    };
+    
+    // Pre-fetch recipes for each meal type (more recipes for weekly plan)
     const recipesByTag = {};
     for (let i = 0; i < mealTags.length; i++) {
       const mealTag = mealTags[i];
       const normalizedTag = mealTag.toLowerCase();
       const tagQuery = { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') }, status: 'published' };
       
+      // Calculate how many recipes we need for this meal type for a week
+      const dishesPerMeal = getDishesPerMeal(eatingHabits || 'moderate', caloriesPerMeal);
+      const minRecipesNeeded = dishesPerMeal * 7; // 7 days
+      
       const recipesForTag = await Recipe.find({
         ...dietQuery,
         ...allergiesQuery,
         ...tagQuery
-      }).limit(10);
+      }).limit(Math.max(20, minRecipesNeeded * 2)); // Fetch extra for variety
       
-      if (recipesForTag.length < 7) {
+      if (recipesForTag.length < minRecipesNeeded) {
         return res.status(400).json({
           success: false,
-          error: `Không đủ công thức cho ${mealTypes[i]} (cần ít nhất 7, tìm thấy ${recipesForTag.length})`
+          error: `Không đủ công thức cho ${mealTypes[i]} (cần ít nhất ${minRecipesNeeded}, tìm thấy ${recipesForTag.length})`
         });
       }
       
@@ -446,31 +599,46 @@ export const generateWeeklyMealPlan = async (req, res) => {
       for (let i = 0; i < mealTypes.length; i++) {
         const mealType = mealTypes[i];
         const mealTag = mealTags[i];
+        const targetMealCalories = caloriesPerMeal;
         
-        // Get available recipes for this tag
+        // Determine how many dishes for this meal
+        const dishesCount = getDishesPerMeal(eatingHabits || 'moderate', targetMealCalories);
+        const caloriesPerDish = Math.round(targetMealCalories / dishesCount);
+        
+        // Get available recipes for this tag (not used today)
         const availableRecipes = recipesByTag[mealTag].filter(
           r => !usedRecipeIdsByDay[dayKey].has(r._id.toString())
         );
         
-        const recipe = availableRecipes.length > 0
-          ? availableRecipes[Math.floor(Math.random() * availableRecipes.length)]
-          : recipesByTag[mealTag][Math.floor(Math.random() * recipesByTag[mealTag].length)];
-        
-        dailyMeals.push({
-          type: mealType,
-          recipeId: recipe._id,
-          name: recipe.name,
-          calories: recipe.nutrition?.calories || 0,
-          macros: {
-            protein: recipe.nutrition?.protein || 0,
-            carbs: recipe.nutrition?.carbs || 0,
-            fat: recipe.nutrition?.fat || 0
-          },
-          imageUrl: recipe.image,
-          ingredients: recipe.ingredients || []
+        // Sort by calorie proximity to target
+        const sortedRecipes = availableRecipes.sort((a, b) => {
+          const aCalories = a.nutrition?.calories || 0;
+          const bCalories = b.nutrition?.calories || 0;
+          const aDiff = Math.abs(aCalories - caloriesPerDish);
+          const bDiff = Math.abs(bCalories - caloriesPerDish);
+          return aDiff - bDiff;
         });
         
-        usedRecipeIdsByDay[dayKey].add(recipe._id.toString());
+        // Select best matching recipes for this meal
+        const selectedRecipes = sortedRecipes.slice(0, dishesCount);
+        
+        for (const recipe of selectedRecipes) {
+          dailyMeals.push({
+            type: mealType,
+            recipeId: recipe._id,
+            name: recipe.name,
+            calories: recipe.nutrition?.calories || 0,
+            macros: {
+              protein: recipe.nutrition?.protein || 0,
+              carbs: recipe.nutrition?.carbs || 0,
+              fat: recipe.nutrition?.fat || 0
+            },
+            imageUrl: recipe.image,
+            ingredients: recipe.ingredients || []
+          });
+          
+          usedRecipeIdsByDay[dayKey].add(recipe._id.toString());
+        }
       }
       
       const totalCalories = dailyMeals.reduce((sum, m) => sum + m.calories, 0);
@@ -541,6 +709,40 @@ export const deleteMealPlan = async (req, res) => {
     });
   } catch (error) {
     console.error('Delete meal plan error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Không thể xóa kế hoạch bữa ăn',
+      details: error.message
+    });
+  }
+};
+
+// @desc    Delete all meal plans for a user (used when canceling goal)
+// @route   DELETE /api/mealplans/user/all
+// @access  Private
+export const deleteAllUserMealPlans = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    // Build query
+    const query = { userId: req.user._id };
+    
+    // Optionally filter by date range (e.g., only delete meal plans during goal period)
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+    
+    const result = await MealPlan.deleteMany(query);
+    
+    res.status(200).json({
+      success: true,
+      message: `Đã xóa ${result.deletedCount} kế hoạch bữa ăn`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Delete all meal plans error:', error);
     res.status(500).json({
       success: false,
       error: 'Không thể xóa kế hoạch bữa ăn',

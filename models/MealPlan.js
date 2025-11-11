@@ -8,6 +8,7 @@ const IngredientSchema = new mongoose.Schema({
 const MealPlanSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   date: { type: Date, required: true },
+  goalId: { type: mongoose.Schema.Types.ObjectId, ref: 'Goal', default: null }, // NEW: null = health-based, has value = goal-based
   meals: [
     {
       type: { type: String, required: true },

@@ -5,6 +5,7 @@ import {
   regenerateMealPlan,
   generateWeeklyMealPlan,
   deleteMealPlan,
+  deleteAllUserMealPlans,
   updateMealInPlan
 } from '../controllers/mealplan.controller.js';
 import { protect } from '../middleware/auth.middleware.js';
@@ -26,6 +27,10 @@ router.post('/regenerate', regenerateMealPlan);
 
 // Generate weekly meal plan (7 days)
 router.post('/weekly', generateWeeklyMealPlan);
+
+// Delete all user meal plans (used when canceling goal)
+// Must be before /:id route to avoid conflict
+router.delete('/user/all', deleteAllUserMealPlans);
 
 // Delete a meal plan
 router.delete('/:id', deleteMealPlan);
