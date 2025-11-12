@@ -646,3 +646,314 @@ export const getTopBlogsByViews = async (req, res) => {
     });
   }
 };
+
+// @desc    Get all blogs (Admin only - includes unpublished)
+// @route   GET /api/blogs/admin/all
+// @access  Private (Admin only)
+export const getAllBlogsAdmin = async (req, res) => {
+  try {
+    const {
+      search,
+      category,
+      tags,
+      published,
+      page = 1,
+      limit = 20,
+      sortBy = "createdAt",
+    } = req.query;
+
+    // Build query - admin can see all blogs
+    const query = {};
+
+    // Filter by published status if provided
+    if (published !== undefined) {
+      query.published = published === "true";
+    }
+
+    // Search by title, excerpt, or content (case-insensitive)
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { excerpt: { $regex: search, $options: "i" } },
+        { content: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    // Filter by category
+    if (category) {
+      query.category = category;
+    }
+
+    // Filter by tags
+    if (tags) {
+      const tagArray = tags.split(",").map((tag) => tag.trim());
+      query.tags = { $in: tagArray };
+    }
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Sort options
+    const sortOptions = {
+      views: { views: -1 },
+      likes: { "likes.length": -1 },
+      createdAt: { createdAt: -1 },
+      updatedAt: { updatedAt: -1 },
+    };
+    const sort = sortOptions[sortBy] || sortOptions.createdAt;
+
+    // Execute query
+    const blogs = await Blog.find(query)
+      .sort(sort)
+      .skip(skip)
+      .limit(limitNum)
+      .populate("authorId", "name email avatar");
+
+    // Get total count for pagination
+    const total = await Blog.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: blogs,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    console.error("Get all blogs admin error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Lỗi khi lấy danh sách blog",
+    });
+  }
+};
+
+// @desc    Delete blog (Admin only - can delete any blog)
+// @route   DELETE /api/blogs/admin/:id
+// @access  Private (Admin only)
+export const deleteBlogAdmin = async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id);
+
+    if (!blog) {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy blog",
+      });
+    }
+
+    // Delete image from Cloudinary if it exists
+    if (blog.imageUrl && blog.imageUrl.includes("cloudinary.com")) {
+      try {
+        const urlParts = blog.imageUrl.split("/");
+        const filename = urlParts[urlParts.length - 1];
+        const publicId = `Meta-Meal/blogs/${filename.split(".")[0]}`;
+        await cloudinary.uploader.destroy(publicId);
+        console.log("Deleted blog image:", publicId);
+      } catch (err) {
+        console.error("Error deleting blog image:", err.message);
+      }
+    }
+
+    await blog.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      message: "Xóa blog thành công",
+      data: {},
+    });
+  } catch (error) {
+    console.error("Delete blog admin error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy blog",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || "Lỗi khi xóa blog",
+    });
+  }
+};
+
+// @desc    Update blog (Admin only - can update any blog)
+// @route   PUT /api/blogs/admin/:id
+// @access  Private (Admin only)
+export const updateBlogAdmin = async (req, res) => {
+  try {
+    let blog = await Blog.findById(req.params.id);
+
+    if (!blog) {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy blog",
+      });
+    }
+
+    const {
+      title,
+      excerpt,
+      content,
+      category,
+      tags,
+      published,
+      relatedRecipes,
+    } = req.body;
+
+    // Update fields if provided
+    if (title) {
+      blog.title = title;
+      // Update slug if title changes
+      blog.slug = generateSlug(title);
+    }
+    if (excerpt !== undefined) blog.excerpt = excerpt;
+    if (content) blog.content = content;
+    if (category !== undefined) blog.category = category;
+
+    // Handle JSON fields
+    if (tags) {
+      blog.tags = typeof tags === "string" ? JSON.parse(tags) : tags;
+    }
+    if (relatedRecipes !== undefined) {
+      blog.relatedRecipes =
+        typeof relatedRecipes === "string"
+          ? JSON.parse(relatedRecipes)
+          : relatedRecipes;
+    }
+
+    // Update published status
+    if (published !== undefined) {
+      blog.published = published;
+      if (published && !blog.publishedAt) {
+        blog.publishedAt = new Date();
+      }
+    }
+
+    // Update image if uploaded
+    if (req.file) {
+      // Delete old image from Cloudinary if it exists
+      if (blog.imageUrl && blog.imageUrl.includes("cloudinary.com")) {
+        try {
+          const urlParts = blog.imageUrl.split("/");
+          const filename = urlParts[urlParts.length - 1];
+          const publicId = `Meta-Meal/blogs/${filename.split(".")[0]}`;
+          await cloudinary.uploader.destroy(publicId);
+          console.log("Deleted old blog image:", publicId);
+        } catch (err) {
+          console.error("Error deleting old blog image:", err.message);
+        }
+      }
+
+      blog.imageUrl = req.file.path;
+    }
+
+    await blog.save();
+
+    // Populate relatedRecipes after saving
+    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
+      await Blog.populate(blog, { path: "relatedRecipes" });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Cập nhật blog thành công",
+      data: blog,
+    });
+  } catch (error) {
+    console.error("Update blog admin error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy blog",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || "Lỗi khi cập nhật blog",
+    });
+  }
+};
+
+// @desc    Get blog statistics (Admin only)
+// @route   GET /api/blogs/admin/stats
+// @access  Private (Admin only)
+export const getBlogStats = async (req, res) => {
+  try {
+    // Total blogs
+    const totalBlogs = await Blog.countDocuments();
+
+    // Published blogs
+    const publishedBlogs = await Blog.countDocuments({ published: true });
+
+    // Unpublished blogs
+    const unpublishedBlogs = await Blog.countDocuments({ published: false });
+
+    // Total views
+    const totalViews = await Blog.aggregate([
+      { $group: { _id: null, totalViews: { $sum: "$views" } } },
+    ]);
+    const views = totalViews.length > 0 ? totalViews[0].totalViews : 0;
+
+    // Total likes
+    const totalLikes = await Blog.aggregate([
+      { $group: { _id: null, totalLikes: { $sum: { $size: "$likes" } } } },
+    ]);
+    const likes = totalLikes.length > 0 ? totalLikes[0].totalLikes : 0;
+
+    // Total comments
+    const totalComments = await Blog.aggregate([
+      { $group: { _id: null, totalComments: { $sum: { $size: "$comments" } } } },
+    ]);
+    const comments = totalComments.length > 0 ? totalComments[0].totalComments : 0;
+
+    // Blogs by category
+    const blogsByCategory = await Blog.aggregate([
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+
+    // Top blogs by views
+    const topBlogsByViews = await Blog.find({ published: true })
+      .sort({ views: -1 })
+      .limit(5)
+      .select("title views author category");
+
+    // Blogs created in last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const recentBlogs = await Blog.countDocuments({
+      createdAt: { $gte: thirtyDaysAgo },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalBlogs,
+        publishedBlogs,
+        unpublishedBlogs,
+        totalViews: views,
+        totalLikes: likes,
+        totalComments: comments,
+        blogsByCategory,
+        topBlogsByViews,
+        recentBlogs,
+      },
+    });
+  } catch (error) {
+    console.error("Get blog stats error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Lỗi khi lấy thống kê blog",
+    });
+  }
+};
