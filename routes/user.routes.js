@@ -11,6 +11,7 @@ import {
   getUserStatsAdmin,
 } from '../controllers/user.controller.js';
 import { protect, admin } from '../middleware/auth.middleware.js';
+import { uploadUser } from '../config/cloudinary.js';
 
 const router = express.Router();
 
@@ -26,8 +27,10 @@ router.put('/admin/:id/unban', protect, admin, unbanUserAdmin);
 router.use(protect);
 
 // Profile routes
-router.get('/profile', getProfile);
-router.put('/profile', updateProfile);
+router
+  .route('/profile/:id?')
+  .get(getProfile)
+  .put(uploadUser.single('avatar'), updateProfile);
 router.post('/complete-onboarding', completeOnboarding);
 
 export default router;

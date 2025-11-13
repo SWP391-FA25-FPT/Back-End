@@ -1,13 +1,154 @@
 import User from '../models/User.model.js';
+import Recipe from '../models/Recipe.js';
+
+const ensureProfileObject = (profile) =>
+  profile && typeof profile === 'object' ? profile : {};
+
+const mapUserSummary = (user) => ({
+  _id: user._id,
+  name: user.name || user.email,
+  username: user.username || '',
+  email: user.email,
+  avatar: user.profile?.profileImageUrl || null,
+});
+
+const formatProfileUser = (user) => ({
+  _id: user._id,
+  name: user.name,
+  username: user.username,
+  email: user.email,
+  role: user.role,
+  isFirstLogin: user.isFirstLogin,
+  subscription: user.subscription,
+  profile: ensureProfileObject(user.profile),
+});
+
+const extractAuthorInfo = (authorDoc, fallbackName) => {
+  if (!authorDoc) {
+    return fallbackName
+      ? {
+          name: fallbackName,
+        }
+      : null;
+  }
+
+  const profile = ensureProfileObject(authorDoc.profile);
+
+  return {
+    _id: authorDoc._id,
+    name: authorDoc.name || fallbackName || authorDoc.email,
+    username: authorDoc.username || '',
+    avatar: profile?.profileImageUrl || null,
+  };
+};
+
+const formatRecipeCard = (recipe, explicitAuthorInfo = null) => {
+  const populatedAuthor =
+    typeof recipe.authorId === 'object' && recipe.authorId !== null
+      ? extractAuthorInfo(recipe.authorId, recipe.author)
+      : null;
+
+  const authorInfo = explicitAuthorInfo || populatedAuthor || extractAuthorInfo(null, recipe.author);
+
+  return {
+    _id: recipe._id,
+    name: recipe.name,
+    image: recipe.image,
+    description: recipe.description,
+    totalTime: recipe.totalTime,
+    servings: recipe.servings,
+    tags: recipe.tags,
+    trustScore: recipe.trustScore,
+    author: authorInfo?.name || recipe.author,
+    authorInfo,
+    status: recipe.status,
+    publishedAt: recipe.publishedAt,
+  };
+};
+
+const buildProfilePayload = async (targetUserId, viewerId) => {
+  const user = await User.findById(targetUserId).select('-password').lean();
+
+  if (!user) {
+    return null;
+  }
+
+  user.profile = ensureProfileObject(user.profile);
+
+  const friendIds = Array.isArray(user.friends) ? user.friends : [];
+  const followerIds = Array.isArray(user.followers) ? user.followers : [];
+  const favoriteIds = Array.isArray(user.favorites) ? user.favorites : [];
+
+  const isOwnProfile =
+    viewerId && viewerId.toString() === user._id.toString();
+
+  const [friendsDocs, followersDocs, publishedRecipes, savedRecipesDocs] = await Promise.all([
+    friendIds.length
+      ? User.find({ _id: { $in: friendIds } })
+          .select('name username email profile.profileImageUrl')
+          .lean()
+      : [],
+    followerIds.length
+      ? User.find({ _id: { $in: followerIds } })
+          .select('name username email profile.profileImageUrl')
+          .lean()
+      : [],
+    Recipe.find({ authorId: user._id, status: 'published' })
+      .sort({ publishedAt: -1, updatedAt: -1 })
+      .lean(),
+    isOwnProfile && favoriteIds.length
+      ? Recipe.find({ _id: { $in: favoriteIds } })
+          .populate('authorId', 'name username email profile.profileImageUrl')
+          .sort({ updatedAt: -1 })
+          .lean()
+      : [],
+  ]);
+
+  const friendSummaries = friendsDocs.map(mapUserSummary);
+  const followerSummaries = followersDocs.map(mapUserSummary);
+
+  const ownerAuthorInfo = extractAuthorInfo(
+    {
+      ...user,
+      profile: user.profile,
+    },
+    user.name || user.email
+  );
+
+  const publishedFormatted = publishedRecipes.map((recipe) =>
+    formatRecipeCard(recipe, ownerAuthorInfo)
+  );
+
+  const savedFormatted = savedRecipesDocs.map((recipe) =>
+    formatRecipeCard(recipe)
+  );
+
+  const stats = {
+    friends: friendIds.length,
+    followers: followerIds.length,
+    recipes: publishedFormatted.length,
+  };
+
+  return {
+    user: formatProfileUser(user),
+    stats,
+    friends: friendSummaries,
+    followers: followerSummaries,
+    recipes: publishedFormatted,
+    savedRecipes: savedFormatted,
+    isOwnProfile,
+  };
+};
 
 // @desc    Get user profile
-// @route   GET /api/user/profile
+// @route   GET /api/user/profile or /api/user/profile/:id
 // @access  Private
 export const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const targetUserId = req.params.id || req.user.id;
+    const payload = await buildProfilePayload(targetUserId, req.user.id);
 
-    if (!user) {
+    if (!payload) {
       return res.status(404).json({
         success: false,
         error: 'User not found',
@@ -16,10 +157,18 @@ export const getProfile = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: user,
+      data: payload,
     });
   } catch (error) {
     console.error('Get profile error:', error);
+
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to get profile',
@@ -28,27 +177,94 @@ export const getProfile = async (req, res) => {
 };
 
 // @desc    Update user profile
-// @route   PUT /api/user/profile
+// @route   PUT /api/user/profile or /api/user/profile/:id
 // @access  Private
 export const updateProfile = async (req, res) => {
   try {
-    const {
-      name,
-      profile: {
-        weight,
-        height,
-        gender,
-        age,
-        workHabits,
-        eatingHabits,
-        diet,
-        allergies,
-        meals,
-        profileImageUrl,
-      } = {},
-    } = req.body;
+    const targetUserId = req.params.id || req.user.id;
 
-    const user = await User.findById(req.user.id);
+    if (req.params.id && req.params.id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Bạn không có quyền cập nhật hồ sơ này',
+      });
+    }
+
+    const { name } = req.body;
+
+    let profilePayload = {};
+
+    if (req.body.profile) {
+      if (typeof req.body.profile === 'string') {
+        try {
+          profilePayload = JSON.parse(req.body.profile);
+        } catch (error) {
+          return res.status(400).json({
+            success: false,
+            error: 'Dữ liệu profile không hợp lệ',
+          });
+        }
+      } else {
+        profilePayload = req.body.profile;
+      }
+    } else {
+      const profileFields = [
+        'weight',
+        'height',
+        'gender',
+        'age',
+        'workHabits',
+        'eatingHabits',
+        'diet',
+        'allergies',
+        'meals',
+        'profileImageUrl',
+      ];
+
+      profileFields.forEach((field) => {
+        if (req.body[field] !== undefined) {
+          profilePayload[field] = req.body[field];
+        }
+      });
+    }
+
+    const normalizeNumber = (value) => {
+      if (value === undefined || value === null || value === '') return undefined;
+      const num = Number(value);
+      return Number.isNaN(num) ? undefined : num;
+    };
+
+    const normalizeArray = (value) => {
+      if (Array.isArray(value)) return value;
+      if (typeof value === 'string' && value.trim() !== '') {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {
+          // ignore
+        }
+        return value
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item);
+      }
+      return undefined;
+    };
+
+    const {
+      weight,
+      height,
+      gender,
+      age,
+      workHabits,
+      eatingHabits,
+      diet,
+      allergies,
+      meals,
+      profileImageUrl,
+    } = profilePayload;
+
+    const user = await User.findById(targetUserId);
 
     if (!user) {
       return res.status(404).json({
@@ -57,35 +273,55 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    // Update basic info
+    user.profile = ensureProfileObject(user.profile);
+
     if (name) user.name = name;
 
-    // Update profile fields
-    if (weight !== undefined) user.profile.weight = weight;
-    if (height !== undefined) user.profile.height = height;
+    const normalizedWeight = normalizeNumber(weight);
+    const normalizedHeight = normalizeNumber(height);
+    const normalizedAge = normalizeNumber(age);
+    const normalizedAllergies = normalizeArray(allergies);
+    const normalizedMeals = normalizeArray(meals);
+
+    if (normalizedWeight !== undefined) user.profile.weight = normalizedWeight;
+    if (normalizedHeight !== undefined) user.profile.height = normalizedHeight;
     if (gender) user.profile.gender = gender;
-    if (age !== undefined) user.profile.age = age;
+    if (normalizedAge !== undefined) user.profile.age = normalizedAge;
     if (workHabits) user.profile.workHabits = workHabits;
     if (eatingHabits) user.profile.eatingHabits = eatingHabits;
     if (diet) user.profile.diet = diet;
-    if (allergies) user.profile.allergies = allergies;
-    if (meals) user.profile.meals = meals;
-    if (profileImageUrl) user.profile.profileImageUrl = profileImageUrl;
+    if (normalizedAllergies) user.profile.allergies = normalizedAllergies;
+    if (normalizedMeals) user.profile.meals = normalizedMeals;
 
-    // Mark as not first login after profile update
+    if (req.file && req.file.path) {
+      user.profile.profileImageUrl = req.file.path;
+    } else if (profileImageUrl) {
+      user.profile.profileImageUrl = profileImageUrl;
+    }
+
     if (user.isFirstLogin) {
       user.isFirstLogin = false;
     }
 
     await user.save();
 
+    const payload = await buildProfilePayload(user._id, req.user.id);
+
     res.status(200).json({
       success: true,
       message: 'Profile updated successfully',
-      data: user,
+      data: payload,
     });
   } catch (error) {
     console.error('Update profile error:', error);
+
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
     res.status(500).json({
       success: false,
       error: error.message || 'Failed to update profile',

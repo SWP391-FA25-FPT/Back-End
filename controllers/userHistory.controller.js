@@ -113,7 +113,11 @@ export const getRecentViewed = async (req, res) => {
     const history = await UserHistory.find({ _id: { $in: historyIds } })
       .populate({
         path: 'recipeId',
-        select: 'name author image totalTime servings tags views'
+        select: 'name author image totalTime servings tags views authorId',
+        populate: {
+          path: 'authorId',
+          select: 'name profile.profileImageUrl',
+        },
       })
       .sort({ viewedAt: -1 });
 
@@ -125,16 +129,18 @@ export const getRecentViewed = async (req, res) => {
     validHistory.forEach(item => {
       const recipeId = item.recipeId._id.toString();
       if (!recipeMap.has(recipeId)) {
+        const authorDoc = item.recipeId.authorId;
         recipeMap.set(recipeId, {
           _id: item.recipeId._id,
           name: item.recipeId.name,
-          author: item.recipeId.author,
+          author: item.recipeId.author || authorDoc?.name,
           image: item.recipeId.image,
           totalTime: item.recipeId.totalTime,
           servings: item.recipeId.servings,
           tags: item.recipeId.tags,
           views: item.recipeId.views,
-          viewedAt: item.viewedAt
+          viewedAt: item.viewedAt,
+          authorAvatar: authorDoc?.profile?.profileImageUrl || null,
         });
       }
     });
