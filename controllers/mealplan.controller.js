@@ -456,7 +456,6 @@ export const regenerateMealPlan = async (req, res) => {
     } else {
       query.goalId = null; // Find health-based meal plan
     }
-    
     const mealPlan = await MealPlan.findOneAndUpdate(
       query,
       {
@@ -540,44 +539,23 @@ export const generateWeeklyMealPlan = async (req, res) => {
       ? { 'ingredients.name': { $nin: allergies } }
       : {};
     
-    // Calculate calories per meal
-    const caloriesPerMeal = Math.round(dailyCalories / meals.length);
-    
-    // Determine dishes per meal based on eating habits
-    const getDishesPerMeal = (eatingHabit, mealCalories) => {
-      if (eatingHabit === 'heavy' || mealCalories > 600) {
-        return 2;
-      }
-      if (eatingHabit === 'light' || mealCalories < 400) {
-        return 1;
-      }
-      if (eatingHabit === 'snacker') {
-        return mealCalories > 500 ? 2 : 1;
-      }
-      return mealCalories > 500 ? 2 : 1;
-    };
-    
-    // Pre-fetch recipes for each meal type (more recipes for weekly plan)
+    // Pre-fetch recipes for each meal type
     const recipesByTag = {};
     for (let i = 0; i < mealTags.length; i++) {
       const mealTag = mealTags[i];
       const normalizedTag = mealTag.toLowerCase();
       const tagQuery = { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') }, status: 'published' };
       
-      // Calculate how many recipes we need for this meal type for a week
-      const dishesPerMeal = getDishesPerMeal(eatingHabits || 'moderate', caloriesPerMeal);
-      const minRecipesNeeded = dishesPerMeal * 7; // 7 days
-      
       const recipesForTag = await Recipe.find({
         ...dietQuery,
         ...allergiesQuery,
         ...tagQuery
-      }).limit(Math.max(20, minRecipesNeeded * 2)); // Fetch extra for variety
+      }).limit(10);
       
-      if (recipesForTag.length < minRecipesNeeded) {
+      if (recipesForTag.length < 7) {
         return res.status(400).json({
           success: false,
-          error: `Không đủ công thức cho ${mealTypes[i]} (cần ít nhất ${minRecipesNeeded}, tìm thấy ${recipesForTag.length})`
+          error: `Không đủ công thức cho ${mealTypes[i]} (cần ít nhất 7, tìm thấy ${recipesForTag.length})`
         });
       }
       
@@ -599,46 +577,31 @@ export const generateWeeklyMealPlan = async (req, res) => {
       for (let i = 0; i < mealTypes.length; i++) {
         const mealType = mealTypes[i];
         const mealTag = mealTags[i];
-        const targetMealCalories = caloriesPerMeal;
         
-        // Determine how many dishes for this meal
-        const dishesCount = getDishesPerMeal(eatingHabits || 'moderate', targetMealCalories);
-        const caloriesPerDish = Math.round(targetMealCalories / dishesCount);
-        
-        // Get available recipes for this tag (not used today)
+        // Get available recipes for this tag
         const availableRecipes = recipesByTag[mealTag].filter(
           r => !usedRecipeIdsByDay[dayKey].has(r._id.toString())
         );
         
-        // Sort by calorie proximity to target
-        const sortedRecipes = availableRecipes.sort((a, b) => {
-          const aCalories = a.nutrition?.calories || 0;
-          const bCalories = b.nutrition?.calories || 0;
-          const aDiff = Math.abs(aCalories - caloriesPerDish);
-          const bDiff = Math.abs(bCalories - caloriesPerDish);
-          return aDiff - bDiff;
+        const recipe = availableRecipes.length > 0
+          ? availableRecipes[Math.floor(Math.random() * availableRecipes.length)]
+          : recipesByTag[mealTag][Math.floor(Math.random() * recipesByTag[mealTag].length)];
+        
+        dailyMeals.push({
+          type: mealType,
+          recipeId: recipe._id,
+          name: recipe.name,
+          calories: recipe.nutrition?.calories || 0,
+          macros: {
+            protein: recipe.nutrition?.protein || 0,
+            carbs: recipe.nutrition?.carbs || 0,
+            fat: recipe.nutrition?.fat || 0
+          },
+          imageUrl: recipe.image,
+          ingredients: recipe.ingredients || []
         });
         
-        // Select best matching recipes for this meal
-        const selectedRecipes = sortedRecipes.slice(0, dishesCount);
-        
-        for (const recipe of selectedRecipes) {
-          dailyMeals.push({
-            type: mealType,
-            recipeId: recipe._id,
-            name: recipe.name,
-            calories: recipe.nutrition?.calories || 0,
-            macros: {
-              protein: recipe.nutrition?.protein || 0,
-              carbs: recipe.nutrition?.carbs || 0,
-              fat: recipe.nutrition?.fat || 0
-            },
-            imageUrl: recipe.image,
-            ingredients: recipe.ingredients || []
-          });
-          
-          usedRecipeIdsByDay[dayKey].add(recipe._id.toString());
-        }
+        usedRecipeIdsByDay[dayKey].add(recipe._id.toString());
       }
       
       const totalCalories = dailyMeals.reduce((sum, m) => sum + m.calories, 0);
@@ -679,6 +642,40 @@ export const generateWeeklyMealPlan = async (req, res) => {
   }
 };
 
+// @desc    Delete all meal plans for a user (used when canceling goal)
+// @route   DELETE /api/mealplans/user/all
+// @access  Private
+export const deleteAllUserMealPlans = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    // Build query
+    const query = { userId: req.user._id };
+    
+    // Optionally filter by date range (e.g., only delete meal plans during goal period)
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+    
+    const result = await MealPlan.deleteMany(query);
+    
+    res.status(200).json({
+      success: true,
+      message: `Đã xóa ${result.deletedCount} kế hoạch bữa ăn`,
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Delete all meal plans error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Không thể xóa kế hoạch bữa ăn',
+      details: error.message
+    });
+  }
+};
+
 // @desc    Delete meal plan
 // @route   DELETE /api/mealplans/:id
 // @access  Private
@@ -709,40 +706,6 @@ export const deleteMealPlan = async (req, res) => {
     });
   } catch (error) {
     console.error('Delete meal plan error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Không thể xóa kế hoạch bữa ăn',
-      details: error.message
-    });
-  }
-};
-
-// @desc    Delete all meal plans for a user (used when canceling goal)
-// @route   DELETE /api/mealplans/user/all
-// @access  Private
-export const deleteAllUserMealPlans = async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-    
-    // Build query
-    const query = { userId: req.user._id };
-    
-    // Optionally filter by date range (e.g., only delete meal plans during goal period)
-    if (startDate || endDate) {
-      query.date = {};
-      if (startDate) query.date.$gte = new Date(startDate);
-      if (endDate) query.date.$lte = new Date(endDate);
-    }
-    
-    const result = await MealPlan.deleteMany(query);
-    
-    res.status(200).json({
-      success: true,
-      message: `Đã xóa ${result.deletedCount} kế hoạch bữa ăn`,
-      deletedCount: result.deletedCount
-    });
-  } catch (error) {
-    console.error('Delete all meal plans error:', error);
     res.status(500).json({
       success: false,
       error: 'Không thể xóa kế hoạch bữa ăn',

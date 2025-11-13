@@ -13,12 +13,10 @@ import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import mealplanRoutes from "./routes/mealplan.routes.js";
-<<<<<<< Updated upstream
-import blogRoutes from "./routes/blog.routes.js";
-=======
 import goalRoutes from "./routes/goal.routes.js";
 import progressTrackingRoutes from "./routes/progressTracking.routes.js";
->>>>>>> Stashed changes
+import blogRoutes from "./routes/blog.routes.js";
+import paypalRoutes from "./routes/paypal.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -54,16 +52,17 @@ app.use("/api/ai", aiRoutes);
 // Meal plan routes
 app.use("/api/mealplans", mealplanRoutes);
 
-<<<<<<< Updated upstream
-// Blog routes
-app.use("/api/blogs", blogRoutes);
-=======
 // Goal routes
 app.use("/api/goals", goalRoutes);
 
 // Progress tracking routes
 app.use("/api/progress", progressTrackingRoutes);
->>>>>>> Stashed changes
+
+// Blog routes
+app.use("/api/blogs", blogRoutes);
+
+// PayPal payment routes
+app.use("/api/paypal", paypalRoutes);
 
 // Status route
 app.get("/", async (req, res) => {
