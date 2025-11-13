@@ -14,11 +14,14 @@ import ratingRoutes, { ratingDeleteRouter } from "./routes/rating.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import mealplanRoutes from "./routes/mealplan.routes.js";
+import goalRoutes from "./routes/goal.routes.js";
+import progressTrackingRoutes from "./routes/progressTracking.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import feedbackRoutes from "./routes/feedback.routes.js";
 import reportRoutes from "./routes/report.routes.js";
 import nutritionRoutes from "./routes/nutrition.routes.js";
+import paypalRoutes from "./routes/paypal.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -55,6 +58,12 @@ app.use("/api/ai", aiRoutes);
 // Meal plan routes
 app.use("/api/mealplans", mealplanRoutes);
 
+// Goal routes
+app.use("/api/goals", goalRoutes);
+
+// Progress tracking routes
+app.use("/api/progress", progressTrackingRoutes);
+
 // Blog routes
 app.use("/api/blogs", blogRoutes);
 
@@ -69,6 +78,9 @@ app.use("/api/feedback", feedbackRoutes);
 
 // Report routes
 app.use("/api/report", reportRoutes);
+
+// PayPal payment routes
+app.use("/api/paypal", paypalRoutes);
 
 // Status route
 app.get("/", async (req, res) => {

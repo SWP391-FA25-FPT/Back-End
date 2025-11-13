@@ -459,7 +459,7 @@ export const searchRecipes = async (req, res) => {
         { name: searchRegex },
         { description: searchRegex },
         { tags: searchRegex }
-      ];
+      ];        
     }
 
     // Filter by specific tags
