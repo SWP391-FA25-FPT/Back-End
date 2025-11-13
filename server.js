@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import connectDB from "./config/db.js";
 import { connectCloudinary } from "./config/cloudinary.js";
+import { checkEdamamStatus } from "./config/edamam.config.js";
 import authRoutes from "./routes/auth.routes.js";
 import userRoutes from "./routes/user.routes.js";
 import recipeRoutes from "./routes/recipe.routes.js";
@@ -14,6 +15,7 @@ import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import mealplanRoutes from "./routes/mealplan.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
+import nutritionRoutes from "./routes/nutrition.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +23,7 @@ dotenv.config();
 // Connect to database
 connectDB();
 connectCloudinary();
+checkEdamamStatus();
 
 const app = express();
 
@@ -51,6 +54,9 @@ app.use("/api/mealplans", mealplanRoutes);
 
 // Blog routes
 app.use("/api/blogs", blogRoutes);
+
+// Nutrition routes
+app.use("/api/nutrition", nutritionRoutes);
 
 // Status route
 app.get("/", async (req, res) => {
