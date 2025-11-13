@@ -8,6 +8,10 @@ const UserSchema = new mongoose.Schema({
   password: { type: String, required: true, select: false },
   role: { type: String, default: 'user', enum: ['user', 'admin', 'professional']},
   isFirstLogin: { type: Boolean, default: true },
+  banned: { type: Boolean, default: false },
+  bannedAt: Date,
+  bannedReason: String,
+  bannedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   profile: {
     weight: Number,
     height: Number,

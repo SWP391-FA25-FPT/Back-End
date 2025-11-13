@@ -77,15 +77,25 @@ export const login = async (req, res) => {
       });
     }
 
-    // Find user (can login with username or email)
+    // Find user (can login with username or email) - include password for comparison
     const user = await User.findOne({
-      $or: [{ username }, { email: username }]
+      $or: [{ email: username }, { username: username }]
     }).select('+password');
 
     if (!user) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         success: false,
-        error: 'Username or Password is incorrect' 
+        error: 'Invalid credentials'
+      });
+    }
+
+    // Check if user is banned
+    if (user.banned) {
+      return res.status(403).json({
+        success: false,
+        error: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ admin để biết thêm chi tiết.',
+        banned: true,
+        bannedReason: user.bannedReason || 'Vi phạm quy tắc cộng đồng',
       });
     }
 

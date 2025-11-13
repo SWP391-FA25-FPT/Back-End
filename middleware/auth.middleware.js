@@ -40,6 +40,16 @@ export const protect = async (req, res, next) => {
         });
       }
 
+      // Check if user is banned
+      if (req.user.banned) {
+        return res.status(403).json({
+          success: false,
+          error: "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ admin để biết thêm chi tiết.",
+          banned: true,
+          bannedReason: req.user.bannedReason || "Vi phạm quy tắc cộng đồng",
+        });
+      }
+
       next();
     } catch (error) {
       return res.status(401).json({

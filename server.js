@@ -15,6 +15,9 @@ import subscriptionRoutes from "./routes/subscription.routes.js";
 import aiRoutes from "./routes/ai.routes.js";
 import mealplanRoutes from "./routes/mealplan.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+import feedbackRoutes from "./routes/feedback.routes.js";
+import reportRoutes from "./routes/report.routes.js";
 import nutritionRoutes from "./routes/nutrition.routes.js";
 
 // Load environment variables
@@ -57,6 +60,15 @@ app.use("/api/blogs", blogRoutes);
 
 // Nutrition routes
 app.use("/api/nutrition", nutritionRoutes);
+
+// Admin routes
+app.use("/api/admin", adminRoutes);
+
+// Feedback routes
+app.use("/api/feedback", feedbackRoutes);
+
+// Report routes
+app.use("/api/report", reportRoutes);
 
 // Status route
 app.get("/", async (req, res) => {
