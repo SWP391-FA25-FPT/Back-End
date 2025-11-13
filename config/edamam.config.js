@@ -12,7 +12,6 @@ const checkEdamamStatus = () => {
   console.log("📊 Edamam API Configuration:");
   console.log(`   APP_ID: ${APP_ID ? "✅ Đã cấu hình" : "❌ Chưa cấu hình"}`);
   console.log(`   APP_KEY: ${APP_KEY ? "✅ Đã cấu hình" : "❌ Chưa cấu hình"}`);
-  console.log(`   URL: ${EDAMAM_URL}`);
 };
 
 export { APP_ID, APP_KEY, EDAMAM_URL, checkEdamamStatus };

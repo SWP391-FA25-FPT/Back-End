@@ -55,7 +55,7 @@ qdrantClient
   .getCollections()
   .then(() => {
     console.log(`✅ Qdrant Connected`);
-    console.log(`🗄️  Collection: ${AI_CHAT_COLLECTION} | URL: ${QDRANT_URL}`);
+    console.log(`🗄️  Collection: ${AI_CHAT_COLLECTION}`);
   })
   .catch((err) => {
     console.error("❌ Qdrant connection failed:", err?.message || err);
