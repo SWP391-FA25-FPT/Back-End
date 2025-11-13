@@ -1,5 +1,38 @@
 import Recipe from '../models/Recipe.js';
 import { cloudinary } from '../config/cloudinary.js';
+import { sendNotification } from '../utils/notificationService.js';
+
+const getUserReactionType = (reactions = [], userId) => {
+  if (!userId) return null;
+  const userIdString = userId.toString();
+
+  const matchedReaction = reactions.find((reaction) =>
+    (reaction.users || []).some((u) => u.toString() === userIdString)
+  );
+
+  return matchedReaction ? matchedReaction.type : null;
+};
+
+const sanitizeReactions = (reactions = []) =>
+  reactions.map((reaction) => ({
+    type: reaction.type,
+    count: reaction.count
+  }));
+
+const buildRecipeResponse = (recipeDoc, userId) => {
+  if (!recipeDoc) return null;
+
+  const recipeObj =
+    typeof recipeDoc.toObject === 'function' ? recipeDoc.toObject() : { ...recipeDoc };
+
+  const userReaction = getUserReactionType(recipeObj.reactions, userId);
+
+  return {
+    ...recipeObj,
+    reactions: sanitizeReactions(recipeObj.reactions),
+    userReaction
+  };
+};
 
 // @desc    Create new recipe
 // @route   POST /api/recipes
@@ -79,16 +112,26 @@ export const createRecipe = async (req, res) => {
       tips: parsedTips || [],
       status: recipeStatus,
       reactions: [
-        { type: 'delicious', count: 0 },
-        { type: 'love', count: 0 },
-        { type: 'fire', count: 0 }
+        { type: 'delicious', count: 0, users: [] },
+        { type: 'love', count: 0, users: [] },
+        { type: 'fire', count: 0, users: [] }
       ]
     });
+
+    if (recipeStatus === 'published') {
+      await sendNotification({
+        userId: req.user._id,
+        type: 'recipe_publish',
+        message: `Công thức "${recipe.name}" đã được lên sóng thành công!`,
+        recipeId: recipe._id,
+        actorId: req.user._id
+      });
+    }
 
     res.status(201).json({
       success: true,
       message: 'Tạo công thức thành công',
-      data: recipe
+      data: buildRecipeResponse(recipe, req.user?._id)
     });
   } catch (error) {
     console.error('Create recipe error:', error);
@@ -164,7 +207,7 @@ export const getAllRecipes = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: recipes,
+      data: recipes.map((recipe) => buildRecipeResponse(recipe)),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -222,7 +265,7 @@ export const getRecipeById = async (req, res) => {
         console.log('User is author - allowing access');
         return res.status(200).json({
           success: true,
-          data: recipe
+          data: buildRecipeResponse(recipe, userId)
         });
       }
 
@@ -233,12 +276,16 @@ export const getRecipeById = async (req, res) => {
       console.log('Checking if user saved recipe...');
       console.log('User favorites:', user?.favorites);
       
-      if (user && user.favorites && user.favorites.some(fav => fav.toString() === recipe._id.toString())) {
+      if (
+        user &&
+        user.favorites &&
+        user.favorites.some((fav) => fav.toString() === recipe._id.toString())
+      ) {
         // User has saved this recipe, allow access
         console.log('User has saved this recipe - allowing access');
         return res.status(200).json({
           success: true,
-          data: recipe
+          data: buildRecipeResponse(recipe, userId)
         });
       }
 
@@ -253,7 +300,7 @@ export const getRecipeById = async (req, res) => {
     // Recipe is published, allow access
     res.status(200).json({
       success: true,
-      data: recipe
+      data: buildRecipeResponse(recipe, req.user?._id)
     });
   } catch (error) {
     console.error('Get recipe by ID error:', error);
@@ -286,6 +333,8 @@ export const updateRecipe = async (req, res) => {
         error: 'Không tìm thấy công thức'
       });
     }
+
+    const previousStatus = recipe.status;
 
     const {
       name,
@@ -375,10 +424,20 @@ export const updateRecipe = async (req, res) => {
 
     await recipe.save();
 
+    if (previousStatus !== 'published' && recipe.status === 'published') {
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'recipe_publish',
+        message: `Công thức "${recipe.name}" đã được lên sóng thành công!`,
+        recipeId: recipe._id,
+        actorId: req.user._id
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Cập nhật công thức thành công',
-      data: recipe
+      data: buildRecipeResponse(recipe, req.user?._id)
     });
   } catch (error) {
     console.error('Update recipe error:', error);
@@ -507,8 +566,8 @@ export const searchRecipes = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: recipes,
-      verifiedRecipes,
+      data: recipes.map((recipe) => buildRecipeResponse(recipe)),
+      verifiedRecipes: verifiedRecipes.map((recipe) => buildRecipeResponse(recipe)),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -528,13 +587,13 @@ export const searchRecipes = async (req, res) => {
 
 // @desc    Add reaction to recipe
 // @route   POST /api/recipes/:id/reactions
-// @access  Public
+// @access  Private
 export const addReaction = async (req, res) => {
   try {
     const { type } = req.body;
     const recipeId = req.params.id;
+    const userId = req.user._id;
 
-    // Validate reaction type
     const validReactionTypes = ['delicious', 'love', 'fire'];
     if (!type || !validReactionTypes.includes(type)) {
       return res.status(400).json({
@@ -543,9 +602,8 @@ export const addReaction = async (req, res) => {
       });
     }
 
-    // Find recipe and update reaction count
     const recipe = await Recipe.findById(recipeId);
-    
+
     if (!recipe) {
       return res.status(404).json({
         success: false,
@@ -553,26 +611,87 @@ export const addReaction = async (req, res) => {
       });
     }
 
-    // Find the reaction in array and increment
-    const reactionIndex = recipe.reactions.findIndex(r => r.type === type);
-    
-    if (reactionIndex !== -1) {
-      recipe.reactions[reactionIndex].count += 1;
-    } else {
-      // If reaction type doesn't exist, add it
-      recipe.reactions.push({ type, count: 1 });
+    const userIdString = userId.toString();
+    const reactionLabels = {
+      delicious: 'Ngon',
+      love: 'Yêu thích',
+      fire: 'Tuyệt vời'
+    };
+
+    if (!Array.isArray(recipe.reactions)) {
+      recipe.reactions = [];
     }
 
-    await recipe.save();
+    const ensureReactionEntry = (reactionType) => {
+      let entry = recipe.reactions.find((r) => r.type === reactionType);
+      if (!entry) {
+        entry = { type: reactionType, count: 0, users: [] };
+        recipe.reactions.push(entry);
+      } else if (!entry.users) {
+        entry.users = [];
+      }
+      return entry;
+    };
+
+    const currentReactionEntry = recipe.reactions.find((reaction) =>
+      (reaction.users || []).some((user) => user.toString() === userIdString)
+    );
+
+    let newUserReaction = null;
+
+    if (currentReactionEntry && currentReactionEntry.type === type) {
+      // Toggle off current reaction
+      currentReactionEntry.users = currentReactionEntry.users.filter(
+        (user) => user.toString() !== userIdString
+      );
+      currentReactionEntry.count = currentReactionEntry.users.length;
+    } else {
+      // Remove from previous reaction if exists
+      if (currentReactionEntry) {
+        currentReactionEntry.users = currentReactionEntry.users.filter(
+          (user) => user.toString() !== userIdString
+        );
+        currentReactionEntry.count = currentReactionEntry.users.length;
+      }
+
+      const targetReaction = ensureReactionEntry(type);
+      if (!targetReaction.users.some((user) => user.toString() === userIdString)) {
+        targetReaction.users.push(userId);
+        targetReaction.count = targetReaction.users.length;
+      }
+      newUserReaction = type;
+    }
+
+    recipe.markModified('reactions');
+    await recipe.save({ validateBeforeSave: false });
+
+    if (
+      newUserReaction &&
+      recipe.authorId &&
+      recipe.authorId.toString() !== userIdString
+    ) {
+      const actorName = req.user.name || req.user.username || req.user.email;
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'reaction',
+        message: `${actorName} đã phản hồi "${reactionLabels[newUserReaction]}" cho công thức "${recipe.name}".`,
+        actorId: userId,
+        recipeId: recipe._id,
+        metadata: { reactionType: newUserReaction }
+      });
+    }
 
     res.status(200).json({
       success: true,
-      message: 'Đã thêm reaction thành công',
-      data: recipe.reactions
+      message: newUserReaction ? 'Đã ghi nhận phản hồi' : 'Đã bỏ phản hồi',
+      data: {
+        reactions: sanitizeReactions(recipe.reactions),
+        userReaction: newUserReaction
+      }
     });
   } catch (error) {
     console.error('Add reaction error:', error);
-    
+
     if (error.kind === 'ObjectId') {
       return res.status(404).json({
         success: false,
@@ -599,7 +718,7 @@ export const getDraftsByUser = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: drafts,
+      data: drafts.map((recipe) => buildRecipeResponse(recipe, req.user._id)),
       count: drafts.length
     });
   } catch (error) {
@@ -657,7 +776,7 @@ export const getMyRecipes = async (req, res) => {
 
       return res.status(200).json({
         success: true,
-        data: paginatedRecipes,
+        data: paginatedRecipes.map((recipe) => buildRecipeResponse(recipe, req.user._id)),
         pagination: {
           page: pageNum,
           limit: limitNum,
@@ -692,7 +811,7 @@ export const getMyRecipes = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: recipes,
+      data: recipes.map((recipe) => buildRecipeResponse(recipe, req.user?._id)),
       pagination: {
         page: pageNum,
         limit: limitNum,
@@ -749,14 +868,26 @@ export const updateRecipeStatus = async (req, res) => {
       });
     }
 
+    const previousStatus = recipe.status;
+
     // Update status
     recipe.status = status;
     await recipe.save(); // This will trigger the pre-save validation
 
+    if (previousStatus !== 'published' && recipe.status === 'published') {
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'recipe_publish',
+        message: `Công thức "${recipe.name}" đã được lên sóng thành công!`,
+        recipeId: recipe._id,
+        actorId: req.user._id
+      });
+    }
+
     res.status(200).json({
       success: true,
       message: 'Cập nhật trạng thái thành công',
-      data: recipe
+      data: buildRecipeResponse(recipe, req.user?._id)
     });
   } catch (error) {
     console.error('Update recipe status error:', error);
@@ -897,7 +1028,7 @@ export const getSavedRecipes = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: recipes,
+      data: recipes.map((recipe) => buildRecipeResponse(recipe, req.user?._id)),
       pagination: {
         page: pageNum,
         limit: limitNum,

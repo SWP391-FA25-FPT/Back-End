@@ -1,5 +1,6 @@
 import Comment from '../models/Comment.js';
 import Recipe from '../models/Recipe.js';
+import { sendNotification } from '../utils/notificationService.js';
 
 // @desc    Get comments by recipe ID
 // @route   GET /api/recipes/:recipeId/comments
@@ -94,6 +95,27 @@ export const createComment = async (req, res) => {
 
     // Populate user info before returning
     await comment.populate('userId', 'name email');
+
+    if (
+      recipe.authorId &&
+      recipe.authorId.toString() !== req.user._id.toString()
+    ) {
+      const actorName = req.user.name || req.user.username || req.user.email;
+      const truncatedText = text.trim().length > 120
+        ? `${text.trim().slice(0, 117)}...`
+        : text.trim();
+
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'comment',
+        message: `${actorName} đã bình luận về "${recipe.name}": "${truncatedText}"`,
+        actorId: req.user._id,
+        recipeId: recipe._id,
+        metadata: {
+          commentId: comment._id
+        }
+      });
+    }
 
     res.status(201).json({
       success: true,

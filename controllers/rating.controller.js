@@ -1,5 +1,6 @@
 import Rating from '../models/Rating.js';
 import Recipe from '../models/Recipe.js';
+import { sendNotification } from '../utils/notificationService.js';
 
 // @desc    Get ratings by recipe ID
 // @route   GET /api/recipes/:recipeId/ratings
@@ -102,16 +103,13 @@ export const createOrUpdateRating = async (req, res) => {
       userId: req.user._id
     });
 
+    const actorName = req.user.name || req.user.username || req.user.email;
+    const isUpdate = Boolean(ratingDoc);
+
     if (ratingDoc) {
       // Update existing rating
       ratingDoc.rating = rating;
       await ratingDoc.save();
-
-      return res.status(200).json({
-        success: true,
-        message: 'Cập nhật đánh giá thành công',
-        data: ratingDoc
-      });
     } else {
       // Create new rating
       ratingDoc = await Rating.create({
@@ -119,13 +117,30 @@ export const createOrUpdateRating = async (req, res) => {
         recipeId,
         rating
       });
+    }
 
-      return res.status(201).json({
-        success: true,
-        message: 'Tạo đánh giá thành công',
-        data: ratingDoc
+    if (
+      recipe.authorId &&
+      recipe.authorId.toString() !== req.user._id.toString()
+    ) {
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'rating',
+        message: `${actorName} đã ${isUpdate ? 'cập nhật đánh giá' : 'đánh giá'} ${rating} sao cho "${recipe.name}".`,
+        actorId: req.user._id,
+        recipeId: recipe._id,
+        metadata: {
+          ratingId: ratingDoc._id,
+          rating
+        }
       });
     }
+
+    return res.status(isUpdate ? 200 : 201).json({
+      success: true,
+      message: isUpdate ? 'Cập nhật đánh giá thành công' : 'Tạo đánh giá thành công',
+      data: ratingDoc
+    });
   } catch (error) {
     console.error('Create/Update rating error:', error);
     

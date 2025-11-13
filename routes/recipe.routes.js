@@ -28,7 +28,7 @@ router.get('/my/:statusType', protect, getMyRecipes);
 router.get('/search', searchRecipes);
 router.get('/', getAllRecipes);
 router.get('/:id', optionalAuth, getRecipeById); // Optional auth to check saved recipes
-router.post('/:id/reactions', addReaction);
+router.post('/:id/reactions', protect, addReaction);
 
 // Save recipe routes (protected)
 router.post('/:id/save', protect, toggleSaveRecipe);

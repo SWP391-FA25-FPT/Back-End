@@ -1,5 +1,6 @@
 import User from '../models/User.model.js';
 import Recipe from '../models/Recipe.js';
+import { sendNotification } from '../utils/notificationService.js';
 
 const ensureProfileObject = (profile) =>
   profile && typeof profile === 'object' ? profile : {};
@@ -299,11 +300,23 @@ export const updateProfile = async (req, res) => {
       user.profile.profileImageUrl = profileImageUrl;
     }
 
+    const wasFirstLogin = user.isFirstLogin;
+
     if (user.isFirstLogin) {
       user.isFirstLogin = false;
     }
 
     await user.save();
+
+    if (wasFirstLogin) {
+      await sendNotification({
+        userId: user._id,
+        type: 'system',
+        title: 'Chào mừng bạn đến Meta Meal',
+        message: 'Cảm ơn bạn đã hoàn thành khảo sát! Bắt đầu khám phá các công thức dành riêng cho bạn nhé.',
+        actorId: req.user._id
+      });
+    }
 
     const payload = await buildProfilePayload(user._id, req.user.id);
 
@@ -343,8 +356,20 @@ export const completeOnboarding = async (req, res) => {
       });
     }
 
+    const wasFirstLogin = user.isFirstLogin;
+
     user.isFirstLogin = false;
     await user.save();
+
+    if (wasFirstLogin) {
+      await sendNotification({
+        userId: user._id,
+        type: 'system',
+        title: 'Chào mừng bạn đến Meta Meal',
+        message: 'Cảm ơn bạn đã hoàn thành khảo sát! Bắt đầu khám phá các công thức dành riêng cho bạn nhé.',
+        actorId: req.user._id
+      });
+    }
 
     res.status(200).json({
       success: true,
