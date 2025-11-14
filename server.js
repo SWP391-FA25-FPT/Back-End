@@ -23,6 +23,7 @@ import reportRoutes from "./routes/report.routes.js";
 import nutritionRoutes from "./routes/nutrition.routes.js";
 import paypalRoutes from "./routes/paypal.routes.js";
 import notificationRoutes from "./routes/notification.route.js";
+import challengeRoutes from "./routes/challenge.routes.js";
 
 // Load environment variables
 dotenv.config();
@@ -85,6 +86,9 @@ app.use("/api/paypal", paypalRoutes);
 
 // Notification routes
 app.use("/api/notifications", notificationRoutes);
+
+// Challenge routes
+app.use("/api/challenges", challengeRoutes);
 
 // Status route
 app.get("/", async (req, res) => {
