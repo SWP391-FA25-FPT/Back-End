@@ -5,7 +5,7 @@ import Feedback from '../models/Feedback.js';
 // @access  Private
 export const createFeedback = async (req, res) => {
   try {
-    const { type, subject, message, priority } = req.body;
+    const { type, subject, message, priority, challengeId } = req.body;
 
     if (!subject || !message) {
       return res.status(400).json({
@@ -22,6 +22,7 @@ export const createFeedback = async (req, res) => {
       subject,
       message,
       priority: priority || 'medium',
+      challengeId: challengeId || undefined,
     });
 
     res.status(201).json({

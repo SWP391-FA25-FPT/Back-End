@@ -8,6 +8,7 @@ const ChallengeEntrySchema = new mongoose.Schema(
     authorAvatar: { type: String, default: "" },
     title: { type: String, required: true },
     image: { type: String, default: "" },
+    content: { type: String, default: "" }, // Cách nấu hoặc status
     likes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     rating: { type: Number, default: 0 },
     views: { type: Number, default: 0 },
@@ -49,6 +50,7 @@ const ChallengeSchema = new mongoose.Schema(
     requirements: [{ type: String }],
     participants: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     entries: [ChallengeEntrySchema],
+    winnerEntryId: { type: mongoose.Schema.Types.ObjectId, default: null }, // Entry thắng giải
   },
   { timestamps: true }
 );

@@ -162,6 +162,34 @@ const uploadChallenge = multer({
   },
 });
 
+// Cấu hình storage riêng cho challenge entries
+const challengeEntryStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "Meta-Meal/challenge-entries",
+    allowed_formats: ["jpg", "jpeg", "png", "gif", "webp"],
+    transformation: [{ width: 1200, height: 1200, crop: "limit" }],
+  },
+});
+
+// Cấu hình upload cho challenge entries
+const uploadChallengeEntry = multer({
+  storage: challengeEntryStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const isValid =
+      allowedTypes.test(file.originalname.toLowerCase()) &&
+      allowedTypes.test(file.mimetype);
+
+    if (isValid) {
+      cb(null, true);
+    } else {
+      cb(new Error("Chỉ cho phép upload file ảnh (JPEG, JPG, PNG, GIF, WEBP)"));
+    }
+  },
+});
+
 export {
   cloudinary,
   upload,
@@ -169,5 +197,6 @@ export {
   uploadBlog,
   uploadUser,
   uploadChallenge,
+  uploadChallengeEntry,
   connectCloudinary,
 };

@@ -46,6 +46,10 @@ const FeedbackSchema = new mongoose.Schema(
       enum: ['low', 'medium', 'high'],
       default: 'medium',
     },
+    challengeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Challenge',
+    },
   },
   {
     timestamps: true,

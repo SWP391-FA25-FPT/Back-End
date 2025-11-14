@@ -2,6 +2,7 @@ import Challenge from "../models/Challenge.js";
 import Recipe from "../models/Recipe.js";
 import User from "../models/User.model.js";
 import { cloudinary } from "../config/cloudinary.js";
+import { sendNotification } from "../utils/notificationService.js";
 
 // @desc    Create new challenge
 // @route   POST /api/challenges
@@ -486,12 +487,26 @@ export const joinChallenge = async (req, res) => {
 // @access  Private
 export const submitEntry = async (req, res) => {
   try {
-    const { recipeId, title, image } = req.body;
+    const { title, content } = req.body;
 
-    if (!recipeId) {
+    // Get image from uploaded file
+    let imageUrl = "";
+    if (req.file) {
+      imageUrl = req.file.path;
+    }
+
+    // Validate required fields
+    if (!imageUrl) {
       return res.status(400).json({
         success: false,
-        error: "Vui lòng cung cấp ID công thức",
+        error: "Vui lòng upload ảnh",
+      });
+    }
+
+    if (!content || content.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        error: "Vui lòng nhập cách nấu hoặc status",
       });
     }
 
@@ -521,26 +536,15 @@ export const submitEntry = async (req, res) => {
       });
     }
 
-    // Check if recipe exists
-    const recipe = await Recipe.findById(recipeId);
-    if (!recipe) {
-      return res.status(404).json({
-        success: false,
-        error: "Không tìm thấy công thức",
-      });
-    }
-
-    // Check if user already submitted this recipe
+    // Check if user already submitted an entry
     const existingEntry = challenge.entries.find(
-      (entry) =>
-        entry.recipeId.toString() === recipeId &&
-        entry.userId.toString() === userId
+      (entry) => entry.userId.toString() === userId
     );
 
     if (existingEntry) {
       return res.status(400).json({
         success: false,
-        error: "Bạn đã nộp công thức này cho thử thách",
+        error: "Bạn đã nộp bài cho thử thách này",
       });
     }
 
@@ -550,12 +554,12 @@ export const submitEntry = async (req, res) => {
 
     // Create entry
     const entry = {
-      recipeId,
       userId,
       author: req.user.name || req.user.email,
       authorAvatar: req.user.avatar || "",
-      title: title || recipe.title,
-      image: image || recipe.imageUrl || "",
+      title: title || "Bài nộp thử thách",
+      image: imageUrl,
+      content: content.trim(),
       likes: [],
       rating: 0,
       views: 0,
@@ -567,8 +571,7 @@ export const submitEntry = async (req, res) => {
     await challenge.save();
 
     // Populate entry data
-    await challenge.populate("entries.recipeId");
-    await challenge.populate("entries.userId", "name avatar");
+    await challenge.populate("entries.userId", "name avatar email");
 
     const newEntry = challenge.entries[challenge.entries.length - 1];
 
@@ -583,7 +586,7 @@ export const submitEntry = async (req, res) => {
     if (error.kind === "ObjectId") {
       return res.status(404).json({
         success: false,
-        error: "Không tìm thấy thử thách hoặc công thức",
+        error: "Không tìm thấy thử thách",
       });
     }
 
@@ -696,6 +699,85 @@ export const likeEntry = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || "Lỗi khi like bài nộp",
+    });
+  }
+};
+
+// @desc    Award prize to entry (Admin only)
+// @route   PUT /api/challenges/:id/award
+// @access  Private (Admin only)
+export const awardPrize = async (req, res) => {
+  try {
+    const { entryId } = req.body;
+
+    if (!entryId) {
+      return res.status(400).json({
+        success: false,
+        error: "Vui lòng cung cấp ID bài nộp",
+      });
+    }
+
+    const challenge = await Challenge.findById(req.params.id);
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy thử thách",
+      });
+    }
+
+    // Check if entry exists
+    const entry = challenge.entries.id(entryId);
+    if (!entry) {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy bài nộp",
+      });
+    }
+
+    // Set winner
+    challenge.winnerEntryId = entryId;
+    await challenge.save();
+
+    // Populate entry data
+    await challenge.populate("entries.userId", "name avatar email");
+    await challenge.populate("winnerEntryId");
+
+    // Send notification to winner
+    const winnerUserId = entry.userId;
+    if (winnerUserId) {
+      await sendNotification({
+        userId: winnerUserId,
+        type: "admin",
+        title: "Chúc mừng! Bạn đã thắng giải thử thách",
+        message: `Bạn đã thắng giải trong thử thách "${challenge.title}". Vui lòng kiểm tra chi tiết giải thưởng trong trang thử thách.`,
+        actorId: req.user._id,
+        metadata: {
+          challengeId: challenge._id,
+          entryId: entryId,
+          type: "challenge_winner",
+        },
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Trao giải thành công",
+      data: challenge,
+    });
+  } catch (error) {
+    console.error("Award prize error:", error);
+
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        error: "Không tìm thấy thử thách hoặc bài nộp",
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: error.message || "Lỗi khi trao giải",
     });
   }
 };

@@ -18,7 +18,7 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['recipe_publish', 'comment', 'rating', 'reaction', 'admin', 'system', 'blog_approved', 'blog_rejected'],
+      enum: ['recipe_publish', 'comment', 'rating', 'reaction', 'admin', 'system', 'blog_approved', 'blog_rejected', 'challenge_winner'],
       default: 'system'
     },
     blog: {
