@@ -40,12 +40,109 @@ const calculateDailyCalories = async (profile, userId = null, useGoalCalories = 
   return dailyCalories;
 };
 
+// Helper function to select optimal recipes for a meal (1-2 dishes)
+// Returns array of meal objects that maximize calories while staying under maxCalories
+const selectOptimalMealRecipes = (recipes, maxCalories, mealType) => {
+  if (!recipes || recipes.length === 0) {
+    return [];
+  }
+
+  // Filter recipes with valid calories
+  const validRecipes = recipes
+    .map(r => ({
+      ...r,
+      calories: r.nutrition?.calories || 0
+    }))
+    .filter(r => r.calories > 0 && r.calories <= maxCalories) // Only consider recipes that fit
+    .sort((a, b) => b.calories - a.calories); // Sort descending (prefer higher calories that fit)
+
+  if (validRecipes.length === 0) {
+    // No recipes fit - try to find smallest recipe available
+    const allRecipes = recipes
+      .map(r => ({
+        ...r,
+        calories: r.nutrition?.calories || 0
+      }))
+      .filter(r => r.calories > 0)
+      .sort((a, b) => a.calories - b.calories); // Sort ascending to find smallest
+    
+    if (allRecipes.length > 0) {
+      console.warn(`Warning: No recipe fits maxCalories (${maxCalories}) for ${mealType}, using smallest available: ${allRecipes[0].calories}`);
+      // Debug: log nutrition data
+      console.log('Recipe nutrition:', allRecipes[0].nutrition);
+      return [{
+        type: mealType,
+        recipeId: allRecipes[0]._id,
+        name: allRecipes[0].name,
+        calories: allRecipes[0].calories,
+        macros: {
+          protein: allRecipes[0].nutrition?.protein || 0,
+          carbs: allRecipes[0].nutrition?.carbs || 0,
+          fat: allRecipes[0].nutrition?.fat || 0,
+          fiber: allRecipes[0].nutrition?.fiber || 0,
+          sugar: allRecipes[0].nutrition?.sugar || 0
+        },
+        imageUrl: allRecipes[0].image,
+        ingredients: allRecipes[0].ingredients || []
+      }];
+    }
+    return [];
+  }
+
+  let bestOption = null;
+  let bestTotalCalories = 0;
+
+  // Try 1-dish option (all recipes already filtered to fit maxCalories)
+  if (validRecipes.length > 0) {
+    bestOption = [validRecipes[0]]; // Highest calorie recipe that fits
+    bestTotalCalories = validRecipes[0].calories;
+  }
+
+  // Try 2-dish combinations (only if maxCalories >= 200 to make it worthwhile)
+  if (maxCalories >= 200 && validRecipes.length >= 2) {
+    for (let i = 0; i < validRecipes.length; i++) {
+      for (let j = i + 1; j < validRecipes.length; j++) {
+        const total = validRecipes[i].calories + validRecipes[j].calories;
+        // All recipes already filtered to fit individually, but check sum still fits
+        if (total <= maxCalories && total > bestTotalCalories) {
+          bestOption = [validRecipes[i], validRecipes[j]];
+          bestTotalCalories = total;
+        }
+      }
+    }
+  }
+
+  // Convert to meal format
+  return bestOption.map(recipe => {
+    // Debug: log nutrition data for first recipe
+    if (bestOption.indexOf(recipe) === 0) {
+      console.log(`[DEBUG] Recipe: ${recipe.name}, Nutrition:`, recipe.nutrition);
+    }
+    
+    return {
+      type: mealType,
+      recipeId: recipe._id,
+      name: recipe.name,
+      calories: recipe.calories,
+      macros: {
+        protein: recipe.nutrition?.protein || 0,
+        carbs: recipe.nutrition?.carbs || 0,
+        fat: recipe.nutrition?.fat || 0,
+        fiber: recipe.nutrition?.fiber || 0,
+        sugar: recipe.nutrition?.sugar || 0
+      },
+      imageUrl: recipe.image,
+      ingredients: recipe.ingredients || []
+    };
+  });
+};
+
 // Mapping from English meal types to Vietnamese tags
 const mealsMap = {
-  breakfast: 'bữa sáng',
-  lunch: 'bữa trưa',
-  dinner: 'bữa tối',
-  snack: 'đồ ăn vặt'
+  breakfast: 'sáng',
+  lunch: 'trưa',
+  dinner: 'tối',
+  snack: 'chiều' // Bữa phụ ở giữa trưa và tối
 };
 
 // @desc    Get meal plans by date or date range
@@ -139,7 +236,7 @@ export const generateMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies, eatingHabits } = user.profile;
+    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
     
     // Validate required profile fields
     const missingFields = [];
@@ -162,9 +259,15 @@ export const generateMealPlan = async (req, res) => {
     // useGoalCalories = false: Use BMR-based calories (Meal Plan Page)
     const dailyCalories = await calculateDailyCalories(user.profile, req.user._id, useGoalCalories);
     
+    // Sort meals to ensure snack is between lunch and dinner
+    const sortedMeals = [...meals].sort((a, b) => {
+      const order = { breakfast: 1, lunch: 2, snack: 3, dinner: 4 };
+      return (order[a.toLowerCase()] || 99) - (order[b.toLowerCase()] || 99);
+    });
+    
     // Map meal preferences to meal types
-    const mealTypes = meals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
-    const mealTags = meals.map(meal => mealsMap[meal.toLowerCase()] || meal);
+    const mealTypes = sortedMeals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
+    const mealTags = sortedMeals.map(meal => mealsMap[meal.toLowerCase()] || meal);
     
     // Build recipe query
     const dietQuery = diet && diet !== 'none' ? { tags: diet } : {};
@@ -172,47 +275,31 @@ export const generateMealPlan = async (req, res) => {
       ? { 'ingredients.name': { $nin: allergies } }
       : {};
     
-    // Calculate calories per meal based on eating habits
-    const caloriesPerMeal = Math.round(dailyCalories / meals.length);
+    // Calculate calories per meal (distribute evenly, but allow flexibility)
+    const caloriesPerMeal = Math.floor(dailyCalories / mealTypes.length);
+    const mealPlansByType = {}; // Store meals by type to ensure each meal has at least 1 dish
     
-    // Determine dishes per meal based on eating habits and calories
-    const getDishesPerMeal = (eatingHabit, mealCalories) => {
-      // Heavy eaters or high calorie meals -> 2 dishes
-      if (eatingHabit === 'heavy' || mealCalories > 600) {
-        return 2;
-      }
-      // Light eaters or low calorie meals -> 1 dish
-      if (eatingHabit === 'light' || mealCalories < 400) {
-        return 1;
-      }
-      // Snackers -> prefer more smaller dishes
-      if (eatingHabit === 'snacker') {
-        return mealCalories > 500 ? 2 : 1;
-      }
-      // Moderate eaters -> 1-2 dishes based on calories
-      return mealCalories > 500 ? 2 : 1;
-    };
-    
-    // Fetch recipes for each meal type with smart dish count
-    const mealPlans = [];
-    
+    // Fetch recipes for each meal type and select optimally
     for (let i = 0; i < mealTypes.length; i++) {
       const mealType = mealTypes[i];
       const mealTag = mealTags[i];
-      const targetMealCalories = caloriesPerMeal;
-      
-      // Determine how many dishes for this meal
-      const dishesCount = getDishesPerMeal(eatingHabits || 'moderate', targetMealCalories);
-      const caloriesPerDish = Math.round(targetMealCalories / dishesCount);
       
       // Query recipes with case-insensitive tag matching
       const normalizedTag = mealTag.toLowerCase();
       const tagQuery = { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') }, status: 'published' };
       
-      // Fetch more recipes to find ones with appropriate calorie range
+      // Fetch multiple recipes to have options (20 recipes for better selection)
+      // Include nutrition fields in projection to ensure we get fiber and sugar
       const recipesForMealType = await Recipe.aggregate([
         { $match: { ...dietQuery, ...allergiesQuery, ...tagQuery } },
-        { $sample: { size: Math.min(10, dishesCount * 3) } } // Get multiple options
+        { $sample: { size: 20 } },
+        { $project: {
+          name: 1,
+          image: 1,
+          ingredients: 1,
+          nutrition: 1,
+          _id: 1
+        }}
       ]);
       
       if (recipesForMealType.length === 0) {
@@ -222,46 +309,99 @@ export const generateMealPlan = async (req, res) => {
         });
       }
       
-      // Sort recipes by how close their calories are to target per dish
-      const sortedRecipes = recipesForMealType.sort((a, b) => {
-        const aCalories = a.nutrition?.calories || 0;
-        const bCalories = b.nutrition?.calories || 0;
-        const aDiff = Math.abs(aCalories - caloriesPerDish);
-        const bDiff = Math.abs(bCalories - caloriesPerDish);
-        return aDiff - bDiff;
-      });
+      // Select optimal recipes for this meal (1-2 dishes) based on calories per meal
+      // Try to get close to caloriesPerMeal but don't exceed
+      const selectedMeals = selectOptimalMealRecipes(recipesForMealType, caloriesPerMeal, mealType);
       
-      // Select the best matching recipes
-      const selectedRecipes = sortedRecipes.slice(0, dishesCount);
-      
-      // Add recipes to meal plan
-      for (const recipe of selectedRecipes) {
-        mealPlans.push({
-          type: mealType,
-          recipeId: recipe._id,
-          name: recipe.name,
-          calories: recipe.nutrition?.calories || 0,
-          macros: {
-            protein: recipe.nutrition?.protein || 0,
-            carbs: recipe.nutrition?.carbs || 0,
-            fat: recipe.nutrition?.fat || 0
-          },
-          imageUrl: recipe.image,
-          ingredients: recipe.ingredients || []
+      if (selectedMeals.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Không thể chọn món phù hợp cho ${mealType}`
         });
       }
+      
+      // Store meals by type (ensure each meal type has at least 1 dish)
+      mealPlansByType[mealType] = selectedMeals;
     }
     
+    // Flatten all meals into single array
+    const mealPlans = Object.values(mealPlansByType).flat();
+    
     // Calculate totals
-    const totalCalories = mealPlans.reduce((sum, meal) => sum + meal.calories, 0);
-    const totalMacros = mealPlans.reduce(
+    let totalCalories = mealPlans.reduce((sum, meal) => sum + meal.calories, 0);
+    let totalMacros = mealPlans.reduce(
       (acc, meal) => ({
         protein: acc.protein + (meal.macros?.protein || 0),
         carbs: acc.carbs + (meal.macros?.carbs || 0),
-        fat: acc.fat + (meal.macros?.fat || 0)
+        fat: acc.fat + (meal.macros?.fat || 0),
+        fiber: acc.fiber + (meal.macros?.fiber || 0),
+        sugar: acc.sugar + (meal.macros?.sugar || 0)
       }),
-      { protein: 0, carbs: 0, fat: 0 }
+      { protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
     );
+    
+    // CRITICAL: If total calories exceed target, reduce dishes from meals with 2 dishes to 1 dish
+    // Ensure each meal type has at least 1 dish
+    if (totalCalories > dailyCalories) {
+      console.warn(`Warning: Total calories (${totalCalories}) exceeds target (${dailyCalories}), reducing dishes...`);
+      
+      // Find meals with 2 dishes and reduce to 1 dish (keep the one with higher calories)
+      for (const mealType of Object.keys(mealPlansByType)) {
+        const meals = mealPlansByType[mealType];
+        if (meals.length > 1 && totalCalories > dailyCalories) {
+          // Keep the dish with higher calories, remove the other
+          meals.sort((a, b) => b.calories - a.calories); // Sort descending
+          const removedMeal = meals.pop(); // Remove the one with lower calories
+          totalCalories -= removedMeal.calories;
+          totalMacros.protein -= removedMeal.macros?.protein || 0;
+          totalMacros.carbs -= removedMeal.macros?.carbs || 0;
+          totalMacros.fat -= removedMeal.macros?.fat || 0;
+          totalMacros.fiber -= removedMeal.macros?.fiber || 0;
+          totalMacros.sugar -= removedMeal.macros?.sugar || 0;
+          console.log(`Reduced ${mealType}: removed ${removedMeal.name} (${removedMeal.calories} cal), kept ${meals[0].name}`);
+        }
+      }
+      
+      // Rebuild mealPlans array from mealPlansByType
+      mealPlans.length = 0;
+      mealPlans.push(...Object.values(mealPlansByType).flat());
+      
+      // Recalculate to be sure
+      totalCalories = mealPlans.reduce((sum, meal) => sum + meal.calories, 0);
+      totalMacros = mealPlans.reduce(
+        (acc, meal) => ({
+          protein: acc.protein + (meal.macros?.protein || 0),
+          carbs: acc.carbs + (meal.macros?.carbs || 0),
+          fat: acc.fat + (meal.macros?.fat || 0),
+          fiber: acc.fiber + (meal.macros?.fiber || 0),
+          sugar: acc.sugar + (meal.macros?.sugar || 0)
+        }),
+        { protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
+      );
+      
+      if (totalCalories > dailyCalories) {
+        console.error(`ERROR: Still exceeds after reduction. This should not happen.`);
+      } else {
+        console.log(`✅ Adjusted total calories to ${totalCalories} (${((totalCalories / dailyCalories) * 100).toFixed(1)}% of target)`);
+      }
+    }
+    
+    // Ensure each meal type has at least 1 dish
+    for (const mealType of mealTypes) {
+      if (!mealPlansByType[mealType] || mealPlansByType[mealType].length === 0) {
+        console.error(`ERROR: Meal type ${mealType} has no dishes!`);
+      }
+    }
+    
+    // Validate final total calories
+    const caloriePercentage = (totalCalories / dailyCalories) * 100;
+    if (totalCalories > dailyCalories) {
+      console.error(`ERROR: Total calories (${totalCalories}) still exceeds target (${dailyCalories}) after adjustment`);
+    } else if (caloriePercentage < 95) {
+      console.warn(`Warning: Total calories (${totalCalories}) is only ${caloriePercentage.toFixed(1)}% of target (${dailyCalories})`);
+    } else {
+      console.log(`✅ Total calories (${totalCalories}) is ${caloriePercentage.toFixed(1)}% of target (${dailyCalories})`);
+    }
     
     // Check if meal plan already exists for this date and goalId
     const targetDate = new Date(date);
@@ -335,7 +475,7 @@ export const regenerateMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies, eatingHabits } = user.profile;
+    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
     
     // Calculate daily calories
     // useGoalCalories = true: Use goal-based calories (Tracking Page)
@@ -344,8 +484,15 @@ export const regenerateMealPlan = async (req, res) => {
     
     // Use default meals if not set
     const userMeals = meals && meals.length > 0 ? meals : ['breakfast', 'lunch', 'dinner'];
-    const mealTypes = userMeals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
-    const mealTags = userMeals.map(meal => mealsMap[meal.toLowerCase()] || meal);
+    
+    // Sort meals to ensure snack is between lunch and dinner
+    const sortedMeals = [...userMeals].sort((a, b) => {
+      const order = { breakfast: 1, lunch: 2, snack: 3, dinner: 4 };
+      return (order[a.toLowerCase()] || 99) - (order[b.toLowerCase()] || 99);
+    });
+    
+    const mealTypes = sortedMeals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
+    const mealTags = sortedMeals.map(meal => mealsMap[meal.toLowerCase()] || meal);
     
     // Build recipe query
     const dietQuery = diet && diet !== 'none' ? { tags: diet } : {};
@@ -353,87 +500,133 @@ export const regenerateMealPlan = async (req, res) => {
       ? { 'ingredients.name': { $nin: allergies } }
       : {};
     
-    // Calculate calories per meal
-    const caloriesPerMeal = Math.round(dailyCalories / userMeals.length);
+    // Calculate calories per meal (distribute evenly, but allow flexibility)
+    const caloriesPerMeal = Math.floor(dailyCalories / mealTypes.length);
+    const mealPlansByType = {}; // Store meals by type to ensure each meal has at least 1 dish
     
-    // Determine dishes per meal based on eating habits and calories
-    const getDishesPerMeal = (eatingHabit, mealCalories) => {
-      if (eatingHabit === 'heavy' || mealCalories > 600) {
-        return 2;
-      }
-      if (eatingHabit === 'light' || mealCalories < 400) {
-        return 1;
-      }
-      if (eatingHabit === 'snacker') {
-        return mealCalories > 500 ? 2 : 1;
-      }
-      return mealCalories > 500 ? 2 : 1;
-    };
-    
-    // Fetch new recipes with smart dish count
-    const newMeals = [];
-    
+    // Fetch recipes for each meal type and select optimally
     for (let i = 0; i < mealTypes.length; i++) {
       const mealType = mealTypes[i];
       const mealTag = mealTags[i];
-      const targetMealCalories = caloriesPerMeal;
       
-      const dishesCount = getDishesPerMeal(eatingHabits || 'moderate', targetMealCalories);
-      const caloriesPerDish = Math.round(targetMealCalories / dishesCount);
-      
+      // Query recipes with case-insensitive tag matching
       const normalizedTag = mealTag.toLowerCase();
       const tagQuery = { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') }, status: 'published' };
       
+      // Fetch multiple recipes to have options (20 recipes for better selection)
+      // Include nutrition fields in projection to ensure we get fiber and sugar
       const recipesForMealType = await Recipe.aggregate([
         { $match: { ...dietQuery, ...allergiesQuery, ...tagQuery } },
-        { $sample: { size: Math.min(10, dishesCount * 3) } }
+        { $sample: { size: 20 } },
+        { $project: {
+          name: 1,
+          image: 1,
+          ingredients: 1,
+          nutrition: 1,
+          _id: 1
+        }}
       ]);
       
       if (recipesForMealType.length === 0) {
         return res.status(400).json({
           success: false,
-          error: `Không tìm thấy công thức cho ${mealType}`
+          error: `Không tìm thấy công thức cho ${mealType} (${mealTag})`
         });
       }
       
-      // Sort by calorie proximity to target
-      const sortedRecipes = recipesForMealType.sort((a, b) => {
-        const aCalories = a.nutrition?.calories || 0;
-        const bCalories = b.nutrition?.calories || 0;
-        const aDiff = Math.abs(aCalories - caloriesPerDish);
-        const bDiff = Math.abs(bCalories - caloriesPerDish);
-        return aDiff - bDiff;
-      });
+      // Select optimal recipes for this meal (1-2 dishes) based on calories per meal
+      // Try to get close to caloriesPerMeal but don't exceed
+      const selectedMeals = selectOptimalMealRecipes(recipesForMealType, caloriesPerMeal, mealType);
       
-      const selectedRecipes = sortedRecipes.slice(0, dishesCount);
-      
-      for (const recipe of selectedRecipes) {
-        newMeals.push({
-          type: mealType,
-          recipeId: recipe._id,
-          name: recipe.name,
-          calories: recipe.nutrition?.calories || 0,
-          macros: {
-            protein: recipe.nutrition?.protein || 0,
-            carbs: recipe.nutrition?.carbs || 0,
-            fat: recipe.nutrition?.fat || 0
-          },
-          imageUrl: recipe.image,
-          ingredients: recipe.ingredients || []
+      if (selectedMeals.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Không thể chọn món phù hợp cho ${mealType}`
         });
       }
+      
+      // Store meals by type (ensure each meal type has at least 1 dish)
+      mealPlansByType[mealType] = selectedMeals;
     }
     
+    // Flatten all meals into single array
+    const newMeals = Object.values(mealPlansByType).flat();
+    
     // Calculate totals
-    const totalCalories = newMeals.reduce((sum, meal) => sum + meal.calories, 0);
-    const totalMacros = newMeals.reduce(
+    let totalCalories = newMeals.reduce((sum, meal) => sum + meal.calories, 0);
+    let totalMacros = newMeals.reduce(
       (acc, meal) => ({
         protein: acc.protein + (meal.macros?.protein || 0),
         carbs: acc.carbs + (meal.macros?.carbs || 0),
-        fat: acc.fat + (meal.macros?.fat || 0)
+        fat: acc.fat + (meal.macros?.fat || 0),
+        fiber: acc.fiber + (meal.macros?.fiber || 0),
+        sugar: acc.sugar + (meal.macros?.sugar || 0)
       }),
-      { protein: 0, carbs: 0, fat: 0 }
+      { protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
     );
+    
+    // CRITICAL: If total calories exceed target, reduce dishes from meals with 2 dishes to 1 dish
+    // Ensure each meal type has at least 1 dish
+    if (totalCalories > dailyCalories) {
+      console.warn(`Warning: Total calories (${totalCalories}) exceeds target (${dailyCalories}), reducing dishes...`);
+      
+      // Find meals with 2 dishes and reduce to 1 dish (keep the one with higher calories)
+      for (const mealType of Object.keys(mealPlansByType)) {
+        const meals = mealPlansByType[mealType];
+        if (meals.length > 1 && totalCalories > dailyCalories) {
+          // Keep the dish with higher calories, remove the other
+          meals.sort((a, b) => b.calories - a.calories); // Sort descending
+          const removedMeal = meals.pop(); // Remove the one with lower calories
+          totalCalories -= removedMeal.calories;
+          totalMacros.protein -= removedMeal.macros?.protein || 0;
+          totalMacros.carbs -= removedMeal.macros?.carbs || 0;
+          totalMacros.fat -= removedMeal.macros?.fat || 0;
+          totalMacros.fiber -= removedMeal.macros?.fiber || 0;
+          totalMacros.sugar -= removedMeal.macros?.sugar || 0;
+          console.log(`Reduced ${mealType}: removed ${removedMeal.name} (${removedMeal.calories} cal), kept ${meals[0].name}`);
+        }
+      }
+      
+      // Rebuild newMeals array from mealPlansByType
+      newMeals.length = 0;
+      newMeals.push(...Object.values(mealPlansByType).flat());
+      
+      // Recalculate to be sure
+      totalCalories = newMeals.reduce((sum, meal) => sum + meal.calories, 0);
+      totalMacros = newMeals.reduce(
+        (acc, meal) => ({
+          protein: acc.protein + (meal.macros?.protein || 0),
+          carbs: acc.carbs + (meal.macros?.carbs || 0),
+          fat: acc.fat + (meal.macros?.fat || 0),
+          fiber: acc.fiber + (meal.macros?.fiber || 0),
+          sugar: acc.sugar + (meal.macros?.sugar || 0)
+        }),
+        { protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
+      );
+      
+      if (totalCalories > dailyCalories) {
+        console.error(`ERROR: Still exceeds after reduction. This should not happen.`);
+      } else {
+        console.log(`✅ Adjusted total calories to ${totalCalories} (${((totalCalories / dailyCalories) * 100).toFixed(1)}% of target)`);
+      }
+    }
+    
+    // Ensure each meal type has at least 1 dish
+    for (const mealType of mealTypes) {
+      if (!mealPlansByType[mealType] || mealPlansByType[mealType].length === 0) {
+        console.error(`ERROR: Meal type ${mealType} has no dishes!`);
+      }
+    }
+    
+    // Validate final total calories
+    const caloriePercentage = (totalCalories / dailyCalories) * 100;
+    if (totalCalories > dailyCalories) {
+      console.error(`ERROR: Total calories (${totalCalories}) still exceeds target (${dailyCalories}) after adjustment`);
+    } else if (caloriePercentage < 95) {
+      console.warn(`Warning: Total calories (${totalCalories}) is only ${caloriePercentage.toFixed(1)}% of target (${dailyCalories})`);
+    } else {
+      console.log(`✅ Total calories (${totalCalories}) is ${caloriePercentage.toFixed(1)}% of target (${dailyCalories})`);
+    }
     
     // Find and update existing meal plan (must match goalId to avoid cross-contamination)
     const targetDate = new Date(date);
@@ -506,7 +699,7 @@ export const generateWeeklyMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies, eatingHabits } = user.profile;
+    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
     
     // Validate required fields
     const missingFields = [];
@@ -550,7 +743,7 @@ export const generateWeeklyMealPlan = async (req, res) => {
         ...dietQuery,
         ...allergiesQuery,
         ...tagQuery
-      }).limit(10);
+      }).select('name image ingredients nutrition _id').limit(10);
       
       if (recipesForTag.length < 7) {
         return res.status(400).json({
@@ -595,7 +788,9 @@ export const generateWeeklyMealPlan = async (req, res) => {
           macros: {
             protein: recipe.nutrition?.protein || 0,
             carbs: recipe.nutrition?.carbs || 0,
-            fat: recipe.nutrition?.fat || 0
+            fat: recipe.nutrition?.fat || 0,
+            fiber: recipe.nutrition?.fiber || 0,
+            sugar: recipe.nutrition?.sugar || 0
           },
           imageUrl: recipe.image,
           ingredients: recipe.ingredients || []
@@ -609,9 +804,11 @@ export const generateWeeklyMealPlan = async (req, res) => {
         (acc, m) => ({
           protein: acc.protein + (m.macros?.protein || 0),
           carbs: acc.carbs + (m.macros?.carbs || 0),
-          fat: acc.fat + (m.macros?.fat || 0)
+          fat: acc.fat + (m.macros?.fat || 0),
+          fiber: acc.fiber + (m.macros?.fiber || 0),
+          sugar: acc.sugar + (m.macros?.sugar || 0)
         }),
-        { protein: 0, carbs: 0, fat: 0 }
+        { protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
       );
       
       const mealPlan = await MealPlan.create({
@@ -749,7 +946,7 @@ export const updateMealInPlan = async (req, res) => {
     }
     
     // Get new recipe
-    const newRecipe = await Recipe.findById(recipeId);
+    const newRecipe = await Recipe.findById(recipeId).select('name image ingredients nutrition _id');
     
     if (!newRecipe) {
       return res.status(404).json({
@@ -767,7 +964,9 @@ export const updateMealInPlan = async (req, res) => {
       macros: {
         protein: newRecipe.nutrition?.protein || 0,
         carbs: newRecipe.nutrition?.carbs || 0,
-        fat: newRecipe.nutrition?.fat || 0
+        fat: newRecipe.nutrition?.fat || 0,
+        fiber: newRecipe.nutrition?.fiber || 0,
+        sugar: newRecipe.nutrition?.sugar || 0
       },
       imageUrl: newRecipe.image,
       ingredients: newRecipe.ingredients || []
@@ -779,9 +978,11 @@ export const updateMealInPlan = async (req, res) => {
       (acc, meal) => ({
         protein: acc.protein + (meal.macros?.protein || 0),
         carbs: acc.carbs + (meal.macros?.carbs || 0),
-        fat: acc.fat + (meal.macros?.fat || 0)
+        fat: acc.fat + (meal.macros?.fat || 0),
+        fiber: acc.fiber + (meal.macros?.fiber || 0),
+        sugar: acc.sugar + (meal.macros?.sugar || 0)
       }),
-      { protein: 0, carbs: 0, fat: 0 }
+      { protein: 0, carbs: 0, fat: 0, fiber: 0, sugar: 0 }
     );
     
     await mealPlan.save();
