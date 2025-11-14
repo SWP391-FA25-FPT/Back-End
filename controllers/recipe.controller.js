@@ -1,4 +1,5 @@
 import Recipe from '../models/Recipe.js';
+import Rating from '../models/Rating.js';
 import { cloudinary } from '../config/cloudinary.js';
 import { sendNotification } from '../utils/notificationService.js';
 
@@ -505,7 +506,9 @@ export const searchRecipes = async (req, res) => {
       page = 1,
       limit = 20,
       sortBy = 'createdAt',
-      minTrustScore
+      minTrustScore,
+      includeIngredients,
+      excludeIngredients
     } = req.query;
 
     // Build search query
@@ -530,6 +533,25 @@ export const searchRecipes = async (req, res) => {
     // Filter by minimum trust score
     if (minTrustScore) {
       query.trustScore = { $gte: parseInt(minTrustScore) };
+    }
+
+    // Filter by ingredients - include
+    if (includeIngredients) {
+      const ingredientArray = Array.isArray(includeIngredients) 
+        ? includeIngredients 
+        : includeIngredients.split(',').map(ing => ing.trim());
+      query['ingredients.name'] = { $in: ingredientArray };
+    }
+
+    // Filter by ingredients - exclude
+    if (excludeIngredients) {
+      const excludeArray = Array.isArray(excludeIngredients)
+        ? excludeIngredients
+        : excludeIngredients.split(',').map(ing => ing.trim());
+      query['ingredients.name'] = { 
+        ...(query['ingredients.name'] || {}),
+        $nin: excludeArray 
+      };
     }
 
     // Pagination
@@ -1306,6 +1328,333 @@ export const getModerationStatsAdmin = async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Lỗi khi lấy thống kê moderation'
+    });
+  }
+};
+
+// @desc    Get top recipes with filters
+// @route   GET /api/recipes/top
+// @access  Public
+export const getTopRecipes = async (req, res) => {
+  try {
+    const {
+      category,
+      timeRange = 'all',
+      sortBy = 'views',
+      includeIngredients,
+      excludeIngredients,
+      minTrustScore,
+      hasStepImages,
+      page = 1,
+      limit = 8
+    } = req.query;
+
+    // Build query
+    const query = { status: 'published' };
+
+    // Filter by category (tags)
+    if (category && category !== 'all') {
+      // Map category to tags
+      const categoryMap = {
+        'healthy': 'healthy',
+        'weight-loss': 'Giảm cân',
+        'muscle-gain': 'Tăng cơ',
+        'vegetarian': 'Chay',
+        'keto': 'Keto'
+      };
+      const tagValue = categoryMap[category] || category;
+      query.tags = { $in: [tagValue] };
+    }
+
+    // Filter by time range
+    if (timeRange !== 'all') {
+      const now = new Date();
+      let startDate;
+      
+      if (timeRange === 'week') {
+        startDate = new Date(now);
+        startDate.setDate(now.getDate() - 7);
+      } else if (timeRange === 'month') {
+        startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - 1);
+      }
+      
+      if (startDate) {
+        query.createdAt = { $gte: startDate };
+      }
+    }
+
+    // Filter by ingredients - include and exclude
+    if (includeIngredients || excludeIngredients) {
+      const ingredientQuery = {};
+      
+      if (includeIngredients) {
+        const ingredientArray = Array.isArray(includeIngredients)
+          ? includeIngredients
+          : includeIngredients.split(',').map(ing => ing.trim()).filter(ing => ing);
+        if (ingredientArray.length > 0) {
+          ingredientQuery.$in = ingredientArray;
+        }
+      }
+      
+      if (excludeIngredients) {
+        const excludeArray = Array.isArray(excludeIngredients)
+          ? excludeIngredients
+          : excludeIngredients.split(',').map(ing => ing.trim()).filter(ing => ing);
+        if (excludeArray.length > 0) {
+          ingredientQuery.$nin = excludeArray;
+        }
+      }
+      
+      if (Object.keys(ingredientQuery).length > 0) {
+        query['ingredients.name'] = ingredientQuery;
+      }
+    }
+
+    // Filter by minimum trust score (premium)
+    if (minTrustScore) {
+      query.trustScore = { $gte: parseInt(minTrustScore) };
+    }
+
+    // Filter by has step images (premium)
+    if (hasStepImages === 'true') {
+      query['steps.image'] = { $exists: true, $ne: '' };
+    }
+
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Aggregate to get recipes with ratings and likes
+    const pipeline = [
+      { $match: query },
+      {
+        $lookup: {
+          from: 'ratings',
+          localField: '_id',
+          foreignField: 'recipeId',
+          as: 'ratings'
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'authorId',
+          foreignField: '_id',
+          as: 'authorInfo'
+        }
+      },
+      {
+        $addFields: {
+          // Calculate total likes from reactions
+          likes: {
+            $sum: {
+              $map: {
+                input: { $ifNull: ['$reactions', []] },
+                as: 'reaction',
+                in: { $ifNull: ['$$reaction.count', 0] }
+              }
+            }
+          },
+          // Calculate average rating
+          rating: {
+            $cond: {
+              if: { $gt: [{ $size: '$ratings' }, 0] },
+              then: {
+                $divide: [
+                  { $sum: '$ratings.rating' },
+                  { $size: '$ratings' }
+                ]
+              },
+              else: 0
+            }
+          },
+          // Check if premium (trustScore >= 70 or has step images)
+          isPremium: {
+            $or: [
+              { $gte: ['$trustScore', 70] },
+              {
+                $gt: [
+                  {
+                    $size: {
+                      $filter: {
+                        input: { $ifNull: ['$steps', []] },
+                        as: 'step',
+                        cond: { $ne: ['$$step.image', ''] }
+                      }
+                    }
+                  },
+                  0
+                ]
+              }
+            ]
+          },
+          // Get author info
+          author: {
+            $let: {
+              vars: {
+                author: { $arrayElemAt: ['$authorInfo', 0] }
+              },
+              in: {
+                name: { $ifNull: ['$$author.name', '$author'] },
+                avatar: { $ifNull: ['$$author.profile.avatar', null] }
+              }
+            }
+          }
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          id: { $toString: '$_id' },
+          name: 1,
+          description: 1,
+          image: 1,
+          views: { $ifNull: ['$views', 0] },
+          likes: { $ifNull: ['$likes', 0] },
+          rating: { $round: [{ $ifNull: ['$rating', 0] }, 1] },
+          isPremium: 1,
+          nutrition: { $ifNull: ['$nutrition', {}] },
+          tags: { $ifNull: ['$tags', []] },
+          category: { $arrayElemAt: ['$tags', 0] },
+          author: {
+            $cond: {
+              if: { $eq: [{ $size: '$authorInfo' }, 0] },
+              then: { name: '$author', avatar: null },
+              else: {
+                name: { $ifNull: [{ $arrayElemAt: ['$authorInfo.name', 0] }, '$author'] },
+                avatar: { $arrayElemAt: ['$authorInfo.profile.avatar', 0] }
+              }
+            }
+          },
+          createdAt: {
+            $dateToString: {
+              format: '%Y-%m-%d',
+              date: '$createdAt'
+            }
+          },
+          trustScore: 1
+        }
+      }
+    ];
+
+    // Sort options
+    const sortOptions = {
+      views: { views: -1 },
+      likes: { likes: -1 },
+      rating: { rating: -1 }
+    };
+    const sortField = sortOptions[sortBy] || sortOptions.views;
+    pipeline.push({ $sort: sortField });
+
+    // Get total count before pagination
+    const countPipeline = [...pipeline];
+    const totalResult = await Recipe.aggregate([
+      ...countPipeline,
+      { $count: 'total' }
+    ]);
+    const total = totalResult[0]?.total || 0;
+
+    // Apply pagination
+    pipeline.push({ $skip: skip });
+    pipeline.push({ $limit: limitNum });
+
+    // Execute aggregation
+    const recipes = await Recipe.aggregate(pipeline);
+
+    // Calculate stats
+    const statsPipeline = [
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalMealPlans: { $sum: 1 },
+          totalViews: { $sum: '$views' },
+          totalLikes: {
+            $sum: {
+              $sum: {
+                $map: {
+                  input: { $ifNull: ['$reactions', []] },
+                  as: 'reaction',
+                  in: { $ifNull: ['$$reaction.count', 0] }
+                }
+              }
+            }
+          }
+        }
+      }
+    ];
+
+    const statsResult = await Recipe.aggregate(statsPipeline);
+    const stats = statsResult[0] || {
+      totalMealPlans: 0,
+      totalViews: 0,
+      totalLikes: 0
+    };
+
+    // Calculate average rating
+    const ratingMatchQuery = { 'recipe.status': 'published' };
+    if (query.tags) {
+      ratingMatchQuery['recipe.tags'] = query.tags;
+    }
+    if (query.createdAt) {
+      ratingMatchQuery['recipe.createdAt'] = query.createdAt;
+    }
+    if (query['ingredients.name']) {
+      ratingMatchQuery['recipe.ingredients.name'] = query['ingredients.name'];
+    }
+    if (query.trustScore) {
+      ratingMatchQuery['recipe.trustScore'] = query.trustScore;
+    }
+    if (query['steps.image']) {
+      ratingMatchQuery['recipe.steps.image'] = query['steps.image'];
+    }
+
+    const avgRatingResult = await Rating.aggregate([
+      {
+        $lookup: {
+          from: 'recipes',
+          localField: 'recipeId',
+          foreignField: '_id',
+          as: 'recipe'
+        }
+      },
+      { $unwind: '$recipe' },
+      { $match: ratingMatchQuery },
+      {
+        $group: {
+          _id: null,
+          averageRating: { $avg: '$rating' }
+        }
+      }
+    ]);
+
+    const averageRating = avgRatingResult[0]?.averageRating || 0;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        mealPlans: recipes,
+        stats: {
+          totalMealPlans: stats.totalMealPlans,
+          totalViews: stats.totalViews,
+          totalLikes: stats.totalLikes,
+          averageRating: Math.round(averageRating * 10) / 10
+        },
+        pagination: {
+          page: pageNum,
+          limit: limitNum,
+          total,
+          pages: Math.ceil(total / limitNum)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get top recipes error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi lấy top recipes'
     });
   }
 };

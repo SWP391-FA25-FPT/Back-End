@@ -15,7 +15,8 @@ import {
   getPendingRecipesAdmin,
   approveRecipeAdmin,
   rejectRecipeAdmin,
-  getModerationStatsAdmin
+  getModerationStatsAdmin,
+  getTopRecipes
 } from '../controllers/recipe.controller.js';
 import { protect, optionalAuth, checkRecipeOwnership, admin } from '../middleware/auth.middleware.js';
 import { uploadRecipe } from '../config/cloudinary.js';
@@ -36,6 +37,7 @@ router.get('/my/:statusType', protect, getMyRecipes);
 
 // Public routes
 router.get('/search', searchRecipes);
+router.get('/top', getTopRecipes);
 router.get('/', getAllRecipes);
 router.get('/:id', optionalAuth, getRecipeById); // Optional auth to check saved recipes
 router.post('/:id/reactions', protect, addReaction);
