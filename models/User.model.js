@@ -23,7 +23,7 @@ const UserSchema = new mongoose.Schema({
       diet: { type: String, enum: ['none', 'vegan', 'vegetarian', 'keto', 'paleo', 'gluten-free'] },
       allergies: [String],
       meals: [{ type: String, enum: ['breakfast', 'lunch', 'dinner', 'snack'] }],
-      profileImageUrl: String,
+      knowledgeSource: { type: String, enum: ['social-media', 'google-search', 'referral', 'advertisement', 'other'] },
     },
     default: {},
   },

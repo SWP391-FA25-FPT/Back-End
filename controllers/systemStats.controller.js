@@ -24,6 +24,27 @@ export const getSystemStats = async (req, res) => {
     const newUsers = await User.countDocuments({
       createdAt: { $gte: thirtyDaysAgo },
     });
+    
+    // User knowledge source statistics
+    const usersByKnowledgeSource = await User.aggregate([
+      { $match: { 'profile.knowledgeSource': { $exists: true, $ne: null } } },
+      { $group: { _id: '$profile.knowledgeSource', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+    
+    // Map knowledge source values to display names
+    const knowledgeSourceMap = {
+      'social-media': 'Mạng xã hội (TikTok, Facebook)',
+      'google-search': 'Tìm kiếm Google',
+      'referral': 'Link chia sẻ / Referral',
+      'advertisement': 'Quảng cáo',
+      'other': 'Khác',
+    };
+    
+    const trafficSource = usersByKnowledgeSource.map(item => ({
+      name: knowledgeSourceMap[item._id] || item._id,
+      value: item.count,
+    }));
 
     // Recipe statistics
     const totalRecipes = await Recipe.countDocuments();
@@ -76,6 +97,7 @@ export const getSystemStats = async (req, res) => {
           byRole: usersByRole,
           active: activeUsers,
           new: newUsers,
+          byKnowledgeSource: trafficSource,
         },
         recipes: {
           total: totalRecipes,
