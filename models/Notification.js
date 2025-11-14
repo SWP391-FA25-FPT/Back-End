@@ -18,8 +18,12 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['recipe_publish', 'comment', 'rating', 'reaction', 'admin', 'system'],
+      enum: ['recipe_publish', 'comment', 'rating', 'reaction', 'admin', 'system', 'blog_approved', 'blog_rejected'],
       default: 'system'
+    },
+    blog: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Blog'
     },
     title: {
       type: String,

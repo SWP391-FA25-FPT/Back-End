@@ -1,5 +1,7 @@
 import Blog from "../models/Blog.js";
 import { cloudinary } from "../config/cloudinary.js";
+import mongoose from "mongoose";
+import { sendNotification } from "../utils/notificationService.js";
 
 // Helper function to generate slug from title
 const generateSlug = (title) => {
@@ -18,6 +20,12 @@ const generateSlug = (title) => {
 // @access  Private (authenticated users)
 export const createBlog = async (req, res) => {
   try {
+    // Log incoming request data for debugging
+    console.log("=== CREATE BLOG REQUEST ===");
+    console.log("req.body:", req.body);
+    console.log("req.file:", req.file ? { fieldname: req.file.fieldname, originalname: req.file.originalname, mimetype: req.file.mimetype } : null);
+    console.log("req.user:", req.user ? { _id: req.user._id, email: req.user.email, name: req.user.name } : null);
+
     const {
       title,
       excerpt,
@@ -30,6 +38,7 @@ export const createBlog = async (req, res) => {
 
     // Validate required fields
     if (!title || !content) {
+      console.error("Missing required fields:", { title: !!title, content: !!content });
       return res.status(400).json({
         success: false,
         error: "Vui lòng cung cấp đầy đủ thông tin: tiêu đề và nội dung",
@@ -51,35 +60,120 @@ export const createBlog = async (req, res) => {
     // Get image from uploaded files
     let imageUrl = "";
     if (req.file) {
-      imageUrl = req.file.path;
+      imageUrl = req.file.path || req.file.url || "";
     }
 
     // Parse JSON fields if they are strings
-    const parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
-    const parsedRelatedRecipes =
-      typeof relatedRecipes === "string"
-        ? JSON.parse(relatedRecipes)
-        : relatedRecipes;
+    let parsedTags = [];
+    if (tags) {
+      try {
+        parsedTags = typeof tags === "string" ? JSON.parse(tags) : tags;
+        if (!Array.isArray(parsedTags)) {
+          parsedTags = [];
+        }
+      } catch (e) {
+        console.error("Error parsing tags:", e);
+        parsedTags = [];
+      }
+    }
+
+    let parsedRelatedRecipes = [];
+    if (relatedRecipes) {
+      try {
+        parsedRelatedRecipes =
+          typeof relatedRecipes === "string"
+            ? JSON.parse(relatedRecipes)
+            : relatedRecipes;
+        if (!Array.isArray(parsedRelatedRecipes)) {
+          parsedRelatedRecipes = [];
+        }
+        // Validate ObjectIds if they exist
+        if (parsedRelatedRecipes.length > 0) {
+          parsedRelatedRecipes = parsedRelatedRecipes.filter(id => {
+            if (typeof id === 'string') {
+              return mongoose.Types.ObjectId.isValid(id);
+            }
+            return true;
+          });
+        }
+      } catch (e) {
+        console.error("Error parsing relatedRecipes:", e);
+        parsedRelatedRecipes = [];
+      }
+    }
+
+    // Blog mới tạo luôn phải chờ admin duyệt
+    // User không thể tự publish blog, chỉ admin mới có thể duyệt
+    const isPublished = false; // Luôn false khi user tạo, admin sẽ duyệt sau
+
+    // Ensure authorId is properly formatted
+    // authorId can be ObjectId or string, model accepts Mixed type
+    const authorIdValue = req.user._id;
 
     // Create blog with author from authenticated user
-    const blog = await Blog.create({
+    const blogData = {
       title,
       slug,
       excerpt: excerpt || "",
       content,
       author: req.user.name || req.user.email,
       authorAvatar: req.user.avatar || "",
-      authorId: req.user._id,
+      authorId: authorIdValue,
       category: category || "",
       imageUrl: imageUrl || "",
-      published: published || false,
-      publishedAt: published ? new Date() : null,
+      published: isPublished, // Luôn false, cần admin duyệt
+      publishedAt: null, // Chỉ set khi admin duyệt
       tags: parsedTags || [],
       relatedRecipes: parsedRelatedRecipes || [],
       likes: [],
       comments: [],
       views: 0,
+    };
+
+    console.log("Creating blog with data:", {
+      title: blogData.title,
+      slug: blogData.slug,
+      author: blogData.author,
+      category: blogData.category,
+      published: blogData.published,
+      tagsCount: blogData.tags?.length || 0,
+      relatedRecipesCount: blogData.relatedRecipes?.length || 0,
+      contentLength: blogData.content?.length || 0,
     });
+
+    let blog;
+    try {
+      blog = await Blog.create(blogData);
+    } catch (createError) {
+      console.error("Blog creation error details:", {
+        name: createError.name,
+        message: createError.message,
+        code: createError.code,
+        keyPattern: createError.keyPattern,
+        keyValue: createError.keyValue,
+        errors: createError.errors,
+      });
+      
+      // Handle specific MongoDB errors
+      if (createError.code === 11000) {
+        // Duplicate key error (slug already exists)
+        return res.status(400).json({
+          success: false,
+          error: `Slug "${createError.keyValue?.slug || blogData.slug}" đã tồn tại. Vui lòng thử tiêu đề khác.`,
+        });
+      }
+      
+      if (createError.name === 'ValidationError') {
+        const validationErrors = Object.values(createError.errors || {}).map(err => err.message).join(', ');
+        return res.status(400).json({
+          success: false,
+          error: `Lỗi validation: ${validationErrors}`,
+        });
+      }
+      
+      // Re-throw to be caught by outer catch
+      throw createError;
+    }
 
     // Populate relatedRecipes after saving
     if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
@@ -92,10 +186,24 @@ export const createBlog = async (req, res) => {
       data: blog,
     });
   } catch (error) {
-    console.error("Create blog error:", error);
+    console.error("=== CREATE BLOG ERROR ===");
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+    console.error("Error stack:", error.stack);
+    console.error("Error code:", error.code);
+    console.error("Error keyPattern:", error.keyPattern);
+    console.error("Error keyValue:", error.keyValue);
+    console.error("Error errors:", error.errors);
+    
+    // If response was already sent, don't send again
+    if (res.headersSent) {
+      return;
+    }
+    
     res.status(500).json({
       success: false,
       error: error.message || "Lỗi khi tạo blog",
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
@@ -282,16 +390,12 @@ export const updateBlog = async (req, res) => {
           : relatedRecipes;
     }
 
-    // Update published status
+    // User không thể tự publish blog, chỉ admin mới có thể duyệt
+    // Nếu user cố gắng set published, bỏ qua và giữ nguyên trạng thái hiện tại
     if (published !== undefined) {
-      // Handle both boolean and string values (from JSON or FormData)
-      const publishedValue = typeof published === 'string' 
-        ? published === 'true' 
-        : Boolean(published);
-      blog.published = publishedValue;
-      if (publishedValue && !blog.publishedAt) {
-        blog.publishedAt = new Date();
-      }
+      // Không cho phép user tự publish, chỉ admin mới có thể
+      // Giữ nguyên trạng thái published hiện tại
+      console.log("User attempted to change published status, ignoring. Current status:", blog.published);
     }
 
     // Update image if uploaded
@@ -661,6 +765,7 @@ export const getAllBlogsAdmin = async (req, res) => {
       category,
       tags,
       published,
+      rejected,
       page = 1,
       limit = 20,
       sortBy = "createdAt",
@@ -669,9 +774,32 @@ export const getAllBlogsAdmin = async (req, res) => {
     // Build query - admin can see all blogs
     const query = {};
 
+    // Filter by rejected status if provided
+    if (rejected !== undefined) {
+      const rejectedValue = rejected === "true" || rejected === true;
+      if (rejectedValue) {
+        // Chỉ lấy blog bị từ chối
+        query.rejected = true;
+      } else if (rejected === "false" || rejected === false) {
+        // Không lấy blog bị từ chối (bao gồm null và false)
+        query.rejected = { $ne: true };
+      }
+    }
+
     // Filter by published status if provided
     if (published !== undefined) {
-      query.published = published === "true";
+      const publishedValue = published === "true" || published === true;
+      query.published = publishedValue;
+      
+      // Nếu filter published, loại trừ rejected blogs (trừ khi đang xem rejected)
+      const isRejectedTab = rejected === "true" || rejected === true;
+      if (publishedValue && !isRejectedTab) {
+        query.rejected = { $ne: true };
+      }
+      // Nếu filter unpublished, loại trừ rejected blogs (trừ khi đang xem rejected)
+      if (!publishedValue && !isRejectedTab) {
+        query.rejected = { $ne: true };
+      }
     }
 
     // Search by title, excerpt, or content (case-insensitive)
@@ -810,6 +938,8 @@ export const updateBlogAdmin = async (req, res) => {
       tags,
       published,
       relatedRecipes,
+      rejected,
+      rejectionReason,
     } = req.body;
 
     // Update fields if provided
@@ -833,15 +963,58 @@ export const updateBlogAdmin = async (req, res) => {
           : relatedRecipes;
     }
 
+    // Track changes for notifications
+    const wasPublished = blog.published;
+    const wasRejected = blog.rejected;
+    let shouldNotifyApproved = false;
+    let shouldNotifyRejected = false;
+
     // Update published status
     if (published !== undefined) {
       // Handle both boolean and string values (from JSON or FormData)
       const publishedValue = typeof published === 'string' 
         ? published === 'true' 
         : Boolean(published);
+      
+      // Chỉ gửi thông báo nếu chuyển từ chưa duyệt sang đã duyệt
+      if (!wasPublished && publishedValue) {
+        shouldNotifyApproved = true;
+      }
+      
       blog.published = publishedValue;
       if (publishedValue && !blog.publishedAt) {
         blog.publishedAt = new Date();
+      }
+      // Khi duyệt (published = true), reset rejected status
+      if (publishedValue) {
+        blog.rejected = false;
+        blog.rejectionReason = "";
+        blog.rejectedAt = null;
+      }
+    }
+
+    // Update rejected status
+    if (rejected !== undefined) {
+      const rejectedValue = typeof rejected === 'string' 
+        ? rejected === 'true' 
+        : Boolean(rejected);
+      
+      // Chỉ gửi thông báo nếu chuyển từ chưa từ chối sang bị từ chối
+      if (!wasRejected && rejectedValue) {
+        shouldNotifyRejected = true;
+      }
+      
+      blog.rejected = rejectedValue;
+      if (rejectedValue) {
+        blog.rejectedAt = new Date();
+        blog.published = false; // Không thể publish nếu bị từ chối
+        if (rejectionReason !== undefined) {
+          blog.rejectionReason = rejectionReason || "";
+        }
+      } else {
+        // Nếu không bị từ chối nữa, reset rejection info
+        blog.rejectionReason = "";
+        blog.rejectedAt = null;
       }
     }
 
@@ -868,6 +1041,50 @@ export const updateBlogAdmin = async (req, res) => {
     // Populate relatedRecipes after saving
     if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
       await Blog.populate(blog, { path: "relatedRecipes" });
+    }
+
+    // Send notifications to blog author
+    if (blog.authorId) {
+      const authorId = typeof blog.authorId === 'object' && blog.authorId._id 
+        ? blog.authorId._id 
+        : blog.authorId;
+      
+      if (shouldNotifyApproved) {
+        // Gửi thông báo blog đã được duyệt
+        await sendNotification({
+          userId: authorId,
+          type: 'blog_approved',
+          title: 'Blog đã được duyệt',
+          message: `Blog "${blog.title}" của bạn đã được admin duyệt và đã được hiển thị công khai.`,
+          actorId: req.user._id,
+          blogId: blog._id,
+          metadata: {
+            blogTitle: blog.title,
+            blogId: blog._id.toString()
+          }
+        });
+      }
+      
+      if (shouldNotifyRejected) {
+        // Gửi thông báo blog bị từ chối
+        const rejectionMsg = blog.rejectionReason 
+          ? `Blog "${blog.title}" của bạn đã bị từ chối với lý do: ${blog.rejectionReason}`
+          : `Blog "${blog.title}" của bạn đã bị từ chối.`;
+        
+        await sendNotification({
+          userId: authorId,
+          type: 'blog_rejected',
+          title: 'Blog bị từ chối',
+          message: rejectionMsg,
+          actorId: req.user._id,
+          blogId: blog._id,
+          metadata: {
+            blogTitle: blog.title,
+            blogId: blog._id.toString(),
+            rejectionReason: blog.rejectionReason || ''
+          }
+        });
+      }
     }
 
     res.status(200).json({
@@ -900,11 +1117,20 @@ export const getBlogStats = async (req, res) => {
     // Total blogs
     const totalBlogs = await Blog.countDocuments();
 
-    // Published blogs
-    const publishedBlogs = await Blog.countDocuments({ published: true });
+    // Published blogs (not rejected)
+    const publishedBlogs = await Blog.countDocuments({ 
+      published: true,
+      rejected: { $ne: true }
+    });
 
-    // Unpublished blogs
-    const unpublishedBlogs = await Blog.countDocuments({ published: false });
+    // Unpublished blogs (not rejected)
+    const unpublishedBlogs = await Blog.countDocuments({ 
+      published: false,
+      rejected: { $ne: true }
+    });
+
+    // Rejected blogs
+    const rejectedBlogs = await Blog.countDocuments({ rejected: true });
 
     // Total views
     const totalViews = await Blog.aggregate([
@@ -946,9 +1172,10 @@ export const getBlogStats = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        totalBlogs,
-        publishedBlogs,
-        unpublishedBlogs,
+        total: totalBlogs,
+        published: publishedBlogs,
+        unpublished: unpublishedBlogs,
+        rejected: rejectedBlogs,
         totalViews: views,
         totalLikes: likes,
         totalComments: comments,

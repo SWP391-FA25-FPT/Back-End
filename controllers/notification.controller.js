@@ -18,6 +18,7 @@ export const getNotifications = async (req, res) => {
       Notification.find(query)
         .populate('actor', 'name username profile.profileImageUrl')
         .populate('recipe', 'name image status')
+        .populate('blog', 'title imageUrl slug')
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limitNum),

@@ -104,8 +104,23 @@ app.get("/", async (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: "Something went wrong!" });
+  console.error("=== ERROR HANDLING MIDDLEWARE ===");
+  console.error("Error name:", err.name);
+  console.error("Error message:", err.message);
+  console.error("Error stack:", err.stack);
+  console.error("Request body:", req.body);
+  console.error("Request file:", req.file);
+  
+  // If response was already sent, don't send again
+  if (res.headersSent) {
+    return next(err);
+  }
+  
+  res.status(err.status || 500).json({ 
+    success: false,
+    error: err.message || "Something went wrong!",
+    details: process.env.NODE_ENV === "development" ? err.stack : undefined
+  });
 });
 
 const PORT = process.env.PORT || 7860;

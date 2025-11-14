@@ -47,7 +47,18 @@ router.get("/", getAllBlogs);
 router.get("/:id", optionalAuth, getBlogById);
 
 // Protected routes (require authentication)
-router.post("/", protect, uploadBlog.single("image"), createBlog);
+router.post("/", protect, (req, res, next) => {
+  uploadBlog.single("image")(req, res, (err) => {
+    if (err) {
+      console.error("Multer upload error:", err);
+      return res.status(400).json({
+        success: false,
+        error: err.message || "Lỗi khi upload ảnh",
+      });
+    }
+    next();
+  });
+}, createBlog);
 
 router.put(
   "/:id",

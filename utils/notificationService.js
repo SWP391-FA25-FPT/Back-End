@@ -6,7 +6,9 @@ const defaultTitles = {
   rating: 'Đánh giá mới',
   reaction: 'Phản hồi mới',
   admin: 'Thông báo từ quản trị viên',
-  system: 'Thông báo'
+  system: 'Thông báo',
+  blog_approved: 'Blog đã được duyệt',
+  blog_rejected: 'Blog bị từ chối'
 };
 
 export const sendNotification = async ({
@@ -16,6 +18,7 @@ export const sendNotification = async ({
   message,
   actorId,
   recipeId,
+  blogId,
   metadata = {}
 }) => {
   if (!userId || !message) {
@@ -27,6 +30,7 @@ export const sendNotification = async ({
       user: userId,
       actor: actorId ?? undefined,
       recipe: recipeId ?? undefined,
+      blog: blogId ?? undefined,
       type,
       title: title || defaultTitles[type] || defaultTitles.system,
       message,
@@ -47,6 +51,7 @@ export const sendBulkNotifications = async ({
   message,
   actorId,
   recipeId,
+  blogId,
   metadata = {}
 }) => {
   if (!Array.isArray(userIds) || userIds.length === 0 || !message) {
@@ -59,6 +64,7 @@ export const sendBulkNotifications = async ({
         user,
         actor: actorId ?? undefined,
         recipe: recipeId ?? undefined,
+        blog: blogId ?? undefined,
         type,
         title: title || defaultTitles[type] || defaultTitles.system,
         message,
