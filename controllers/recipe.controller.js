@@ -1080,3 +1080,232 @@ export const checkRecipeSaved = async (req, res) => {
     });
   }
 };
+
+// ==================== ADMIN FUNCTIONS ====================
+
+// @desc    Get pending recipes for moderation (Admin only)
+// @route   GET /api/recipes/admin/pending
+// @access  Private (Admin only)
+export const getPendingRecipesAdmin = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status, search, category } = req.query;
+
+    // Build query for pending recipes (draft or private status, exclude rejected)
+    let query = {};
+
+    // Filter by specific status if provided
+    if (status && ['draft', 'private'].includes(status)) {
+      // Specific status filter, exclude rejected
+      query.status = status;
+    } else {
+      // Default: get both draft and private (exclude rejected)
+      query.$and = [
+        {
+          $or: [
+            { status: 'draft' },
+            { status: 'private' }
+          ]
+        },
+        { status: { $ne: 'rejected' } }
+      ];
+    }
+
+    // Search by name or description
+    if (search && search.trim()) {
+      const searchRegex = { $regex: search.trim(), $options: 'i' };
+      const searchConditions = [
+        { name: searchRegex },
+        { description: searchRegex }
+      ];
+      
+      if (query.$and) {
+        // If we have $and, add search condition to it
+        query.$and.push({ $or: searchConditions });
+      } else {
+        // If status filter is specific, combine with $and
+        const statusCondition = { status: query.status };
+        delete query.status;
+        query.$and = [
+          statusCondition,
+          { $or: searchConditions }
+        ];
+      }
+    }
+
+    // Filter by tags (category)
+    if (category && category.trim()) {
+      query.tags = { $in: [category.trim()] };
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Get total count
+    const total = await Recipe.countDocuments(query);
+
+    // Get recipes with pagination
+    const recipes = await Recipe.find(query)
+      .populate('authorId', 'name email')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    res.status(200).json({
+      success: true,
+      data: recipes.map((recipe) => buildRecipeResponse(recipe, req.user?._id)),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum)
+      }
+    });
+  } catch (error) {
+    console.error('Get pending recipes admin error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi lấy danh sách recipes chờ duyệt'
+    });
+  }
+};
+
+// @desc    Approve recipe (Admin only)
+// @route   PUT /api/recipes/admin/:id/approve
+// @access  Private (Admin only)
+export const approveRecipeAdmin = async (req, res) => {
+  try {
+    const recipeId = req.params.id;
+
+    const recipe = await Recipe.findById(recipeId);
+    if (!recipe) {
+      return res.status(404).json({
+        success: false,
+        error: 'Không tìm thấy công thức'
+      });
+    }
+
+    // Update recipe status to published
+    recipe.status = 'published';
+    recipe.publishedAt = new Date();
+    await recipe.save();
+
+    // Send notification to author if exists
+    if (recipe.authorId) {
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'system',
+        title: 'Công thức của bạn đã được duyệt',
+        message: `Công thức "${recipe.name}" đã được duyệt và xuất bản thành công.`,
+        actorId: req.user._id
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Đã duyệt công thức thành công',
+      data: buildRecipeResponse(recipe, req.user?._id)
+    });
+  } catch (error) {
+    console.error('Approve recipe admin error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi duyệt công thức'
+    });
+  }
+};
+
+// @desc    Reject recipe (Admin only)
+// @route   PUT /api/recipes/admin/:id/reject
+// @access  Private (Admin only)
+export const rejectRecipeAdmin = async (req, res) => {
+  try {
+    const recipeId = req.params.id;
+    const { reason } = req.body;
+
+    const recipe = await Recipe.findById(recipeId);
+    if (!recipe) {
+      return res.status(404).json({
+        success: false,
+        error: 'Không tìm thấy công thức'
+      });
+    }
+
+    // Update recipe status to rejected
+    recipe.status = 'rejected';
+    recipe.rejectionReason = reason || '';
+    recipe.rejectedAt = new Date();
+    await recipe.save();
+
+    // Send notification to author if exists
+    if (recipe.authorId) {
+      await sendNotification({
+        userId: recipe.authorId,
+        type: 'system',
+        title: 'Công thức của bạn đã bị từ chối',
+        message: `Công thức "${recipe.name}" đã bị từ chối.${reason ? ` Lý do: ${reason}` : ''}`,
+        actorId: req.user._id
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Đã từ chối công thức thành công',
+      data: buildRecipeResponse(recipe, req.user?._id)
+    });
+  } catch (error) {
+    console.error('Reject recipe admin error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi từ chối công thức'
+    });
+  }
+};
+
+// @desc    Get moderation statistics (Admin only)
+// @route   GET /api/recipes/admin/moderation/stats
+// @access  Private (Admin only)
+export const getModerationStatsAdmin = async (req, res) => {
+  try {
+    const pendingCount = await Recipe.countDocuments({
+      $and: [
+        { $or: [{ status: 'draft' }, { status: 'private' }] },
+        { status: { $ne: 'rejected' } }
+      ]
+    });
+    const draftCount = await Recipe.countDocuments({ status: 'draft' });
+    const privateCount = await Recipe.countDocuments({ status: 'private' });
+    const publishedCount = await Recipe.countDocuments({ status: 'published' });
+
+    // Get recipes by priority (based on views or saves, exclude rejected)
+    const highPriorityCount = await Recipe.countDocuments({
+      $and: [
+        { $or: [{ status: 'draft' }, { status: 'private' }] },
+        { status: { $ne: 'rejected' } },
+        {
+          $or: [
+            { views: { $gte: 100 } },
+            { saves: { $gte: 50 } }
+          ]
+        }
+      ]
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        pending: pendingCount,
+        draft: draftCount,
+        private: privateCount,
+        published: publishedCount,
+        highPriority: highPriorityCount
+      }
+    });
+  } catch (error) {
+    console.error('Get moderation stats admin error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Lỗi khi lấy thống kê moderation'
+    });
+  }
+};

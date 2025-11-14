@@ -69,9 +69,11 @@ const recipeSchema = new mongoose.Schema(
     trustScore: { type: Number, default: 0 },
     status: {
       type: String,
-      enum: ["draft", "private", "published"],
+      enum: ["draft", "private", "published", "rejected"],
       default: "draft",
     },
+    rejectionReason: { type: String },
+    rejectedAt: { type: Date },
     lastEditedAt: { type: Date, default: Date.now },
     publishedAt: { type: Date },
   },

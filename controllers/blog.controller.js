@@ -284,8 +284,12 @@ export const updateBlog = async (req, res) => {
 
     // Update published status
     if (published !== undefined) {
-      blog.published = published;
-      if (published && !blog.publishedAt) {
+      // Handle both boolean and string values (from JSON or FormData)
+      const publishedValue = typeof published === 'string' 
+        ? published === 'true' 
+        : Boolean(published);
+      blog.published = publishedValue;
+      if (publishedValue && !blog.publishedAt) {
         blog.publishedAt = new Date();
       }
     }
@@ -831,8 +835,12 @@ export const updateBlogAdmin = async (req, res) => {
 
     // Update published status
     if (published !== undefined) {
-      blog.published = published;
-      if (published && !blog.publishedAt) {
+      // Handle both boolean and string values (from JSON or FormData)
+      const publishedValue = typeof published === 'string' 
+        ? published === 'true' 
+        : Boolean(published);
+      blog.published = publishedValue;
+      if (publishedValue && !blog.publishedAt) {
         blog.publishedAt = new Date();
       }
     }

@@ -11,14 +11,24 @@ import {
   getMyRecipes,
   updateRecipeStatus,
   toggleSaveRecipe,
-  checkRecipeSaved
+  checkRecipeSaved,
+  getPendingRecipesAdmin,
+  approveRecipeAdmin,
+  rejectRecipeAdmin,
+  getModerationStatsAdmin
 } from '../controllers/recipe.controller.js';
-import { protect, optionalAuth, checkRecipeOwnership } from '../middleware/auth.middleware.js';
+import { protect, optionalAuth, checkRecipeOwnership, admin } from '../middleware/auth.middleware.js';
 import { uploadRecipe } from '../config/cloudinary.js';
 import commentRoutes from './comment.routes.js';
 import ratingRoutes from './rating.routes.js';
 
 const router = express.Router();
+
+// Admin routes (must come before other routes to avoid conflicts)
+router.get('/admin/pending', protect, admin, getPendingRecipesAdmin);
+router.get('/admin/moderation/stats', protect, admin, getModerationStatsAdmin);
+router.put('/admin/:id/approve', protect, admin, approveRecipeAdmin);
+router.put('/admin/:id/reject', protect, admin, rejectRecipeAdmin);
 
 // My recipes routes (must come before public routes to avoid conflicts)
 router.get('/my/drafts', protect, getDraftsByUser);
