@@ -1,8 +1,12 @@
 import User from '../models/User.model.js';
 import crypto from 'crypto';
-import emailjs from '@emailjs/browser';
 
-// @desc    Forgot password - Send reset email
+// Generate secure reset token
+const generateResetToken = () => {
+  return crypto.randomBytes(32).toString('hex');
+};
+
+// @desc    Forgot password - Send reset link
 // @route   POST /api/auth/forgot-password
 // @access  Public
 export const forgotPassword = async (req, res) => {
@@ -12,7 +16,7 @@ export const forgotPassword = async (req, res) => {
     if (!email) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide email address',
+        error: 'Vui lòng cung cấp địa chỉ email',
       });
     }
 
@@ -23,39 +27,42 @@ export const forgotPassword = async (req, res) => {
       // Don't reveal if user exists or not for security
       return res.status(200).json({
         success: true,
-        message: 'If an account with that email exists, we have sent a password reset link.',
+        message: 'Nếu tài khoản tồn tại, chúng tôi đã gửi link đặt lại mật khẩu đến email của bạn.',
+        data: {
+          email: email,
+          resetToken: null // Don't send token if user doesn't exist
+        }
       });
     }
 
     // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    const resetToken = generateResetToken();
+    const tokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-    // Save reset token to user (we'll add these fields to the model)
+    // Save token to user
     user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = resetTokenExpires;
+    user.resetPasswordExpires = tokenExpires;
     await user.save();
-
-    // Create reset URL
-    const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
-
-    // Send email using EmailJS
-    await sendResetEmail(email, resetUrl, user.username);
 
     res.status(200).json({
       success: true,
-      message: 'Password reset link sent to your email',
+      message: 'Link đặt lại mật khẩu đã được gửi đến email của bạn',
+      data: {
+        email: email,
+        username: user.username || user.name,
+        resetToken: resetToken // Frontend will use this to create reset link
+      }
     });
   } catch (error) {
     console.error('Forgot password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to send reset email',
+      error: 'Không thể gửi link đặt lại mật khẩu',
     });
   }
 };
 
-// @desc    Reset password
+// @desc    Verify token and Reset password
 // @route   POST /api/auth/reset-password
 // @access  Public
 export const resetPassword = async (req, res) => {
@@ -65,7 +72,7 @@ export const resetPassword = async (req, res) => {
     if (!token || !newPassword) {
       return res.status(400).json({
         success: false,
-        error: 'Token and new password are required',
+        error: 'Token và mật khẩu mới là bắt buộc',
       });
     }
 
@@ -73,12 +80,12 @@ export const resetPassword = async (req, res) => {
     const user = await User.findOne({
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() },
-    });
+    }).select('+password');
 
     if (!user) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or expired reset token',
+        error: 'Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
       });
     }
 
@@ -90,39 +97,14 @@ export const resetPassword = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: 'Password has been reset successfully',
+      message: 'Mật khẩu đã được đặt lại thành công',
     });
   } catch (error) {
     console.error('Reset password error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to reset password',
+      error: 'Không thể đặt lại mật khẩu',
     });
   }
 };
 
-// Helper function to send reset email using EmailJS
-const sendResetEmail = async (email, resetUrl, username) => {
-  try {
-    // EmailJS configuration
-    const serviceId = 'service_g92sko8';
-    const templateId = 'template_gvtzwtr';
-    const publicKey = process.env.EMAILJS_PUBLIC_KEY || 'your-emailjs-public-key';
-
-    // Template parameters for EmailJS
-    const templateParams = {
-      to_email: email,
-      to_name: username,
-      reset_url: resetUrl,
-      from_name: 'Meta Meal Team',
-      message: `Hello ${username}, we received a request to reset your password for your Meta Meal account. Click the link below to reset your password. This link will expire in 10 minutes for security reasons.`,
-    };
-
-    // Send email using EmailJS
-    await emailjs.send(serviceId, templateId, templateParams, publicKey);
-    console.log('Reset email sent successfully via EmailJS');
-  } catch (error) {
-    console.error('Error sending reset email:', error);
-    throw error;
-  }
-};

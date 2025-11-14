@@ -18,7 +18,9 @@ const MealPlanSchema = new mongoose.Schema({
       macros: {
         protein: { type: Number, required: true },
         carbs: { type: Number, required: true },
-        fat: { type: Number, required: true }
+        fat: { type: Number, required: true },
+        fiber: { type: Number, default: 0 },
+        sugar: { type: Number, default: 0 }
       },
       imageUrl: { type: String },
       ingredients: [IngredientSchema],
@@ -28,7 +30,9 @@ const MealPlanSchema = new mongoose.Schema({
   totalMacros: {
     protein: { type: Number, required: true },
     carbs: { type: Number, required: true },
-    fat: { type: Number, required: true }
+    fat: { type: Number, required: true },
+    fiber: { type: Number, default: 0 },
+    sugar: { type: Number, default: 0 }
   },
   targetCalories: { type: Number, required: true },
 });

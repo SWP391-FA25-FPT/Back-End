@@ -5,7 +5,9 @@ const UserSchema = new mongoose.Schema({
   name: String,
   username: { type: String, unique: true, sparse: true },
   email: { type: String, required: true, unique: true },
-  password: { type: String, required: true, select: false },
+  password: { type: String, required: false, select: false }, // Optional for Google users
+  googleId: { type: String, unique: true, sparse: true }, // Google user ID
+  authProvider: { type: String, enum: ['local', 'google'], default: 'local' }, // Track login method
   role: { type: String, default: 'user', enum: ['user', 'admin', 'professional']},
   isFirstLogin: { type: Boolean, default: true },
   banned: { type: Boolean, default: false },
@@ -43,13 +45,16 @@ const UserSchema = new mongoose.Schema({
   },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
+  emailVerified: { type: Boolean, default: false },
+  verificationOTP: String,
+  verificationOTPExpires: Date,
   createdAt: { type: Date, default: Date.now },
 });
 
-// Hash password before saving
+// Hash password before saving (only for local auth users)
 UserSchema.pre('save', async function(next) {
-  // Only hash if password is modified or new
-  if (!this.isModified('password')) {
+  // Only hash if password is modified or new, and user is not using Google auth
+  if (!this.isModified('password') || !this.password || this.authProvider === 'google') {
     return next();
   }
   
