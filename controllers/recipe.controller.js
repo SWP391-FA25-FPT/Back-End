@@ -1366,7 +1366,8 @@ export const getTopRecipes = async (req, res) => {
       query.tags = { $in: [tagValue] };
     }
 
-    // Filter by time range
+    // Filter by time range - will be applied after date normalization in pipeline
+    let timeRangeFilter = null;
     if (timeRange !== 'all') {
       const now = new Date();
       let startDate;
@@ -1380,7 +1381,9 @@ export const getTopRecipes = async (req, res) => {
       }
       
       if (startDate) {
-        query.createdAt = { $gte: startDate };
+        // Store for later use in pipeline after date normalization
+        // Don't add to initial query since Extended JSON dates won't match
+        timeRangeFilter = { createdAt: { $gte: startDate } };
       }
     }
 
@@ -1447,6 +1450,139 @@ export const getTopRecipes = async (req, res) => {
       },
       {
         $addFields: {
+          // Normalize createdAt from Extended JSON format to Date object
+          createdAt: {
+            $let: {
+              vars: {
+                // Extract date value if in Extended JSON format
+                // Handle both regular Date objects and Extended JSON format
+                dateValue: {
+                  $cond: {
+                    // If already a date, use it directly
+                    if: { $eq: [{ $type: '$createdAt' }, 'date'] },
+                    then: '$createdAt',
+                    // If it's an object, might be Extended JSON format
+                    else: {
+                      $cond: {
+                        if: { $eq: [{ $type: '$createdAt' }, 'object'] },
+                        then: {
+                          $let: {
+                            vars: {
+                              // Find the $date field by converting object to array
+                              dateEntry: {
+                                $arrayElemAt: [
+                                  {
+                                    $filter: {
+                                      input: { $objectToArray: '$createdAt' },
+                                      as: 'item',
+                                      cond: { $eq: ['$$item.k', '$date'] }
+                                    }
+                                  },
+                                  0
+                                ]
+                              }
+                            },
+                            in: {
+                              $cond: {
+                                if: { $ne: ['$$dateEntry', null] },
+                                then: {
+                                  $let: {
+                                    vars: {
+                                      dateField: '$$dateEntry.v'
+                                    },
+                                    in: {
+                                      $cond: {
+                                        // Check if dateField is an object with $numberLong
+                                        if: {
+                                          $and: [
+                                            { $eq: [{ $type: '$$dateField' }, 'object'] },
+                                            {
+                                              $ne: [
+                                                {
+                                                  $arrayElemAt: [
+                                                    {
+                                                      $filter: {
+                                                        input: { $objectToArray: '$$dateField' },
+                                                        as: 'item',
+                                                        cond: { $eq: ['$$item.k', '$numberLong'] }
+                                                      }
+                                                    },
+                                                    0
+                                                  ]
+                                                },
+                                                null
+                                              ]
+                                            }
+                                          ]
+                                        },
+                                        then: {
+                                          $let: {
+                                            vars: {
+                                              numberLongEntry: {
+                                                $arrayElemAt: [
+                                                  {
+                                                    $filter: {
+                                                      input: { $objectToArray: '$$dateField' },
+                                                      as: 'item',
+                                                      cond: { $eq: ['$$item.k', '$numberLong'] }
+                                                    }
+                                                  },
+                                                  0
+                                                ]
+                                              }
+                                            },
+                                            in: {
+                                              $toLong: '$$numberLongEntry.v'
+                                            }
+                                          }
+                                        },
+                                        else: '$$dateField'
+                                      }
+                                    }
+                                  }
+                                },
+                                else: '$createdAt'
+                              }
+                            }
+                          }
+                        },
+                        else: '$createdAt'
+                      }
+                    }
+                  }
+                }
+              },
+              in: {
+                // Convert to Date, handling all formats safely
+                $cond: {
+                  // If already a date, use it directly
+                  if: { $eq: [{ $type: '$$dateValue' }, 'date'] },
+                  then: '$$dateValue',
+                  else: {
+                    // Try to convert to date
+                    $convert: {
+                      input: '$$dateValue',
+                      to: 'date',
+                      onError: {
+                        // If conversion fails, try dateFromString for string dates
+                        $cond: {
+                          if: { $eq: [{ $type: '$$dateValue' }, 'string'] },
+                          then: {
+                            $dateFromString: {
+                              dateString: '$$dateValue',
+                              onError: { $dateFromParts: { year: 1970, month: 1, day: 1 } }
+                            }
+                          },
+                          else: { $dateFromParts: { year: 1970, month: 1, day: 1 } }
+                        }
+                      },
+                      onNull: { $dateFromParts: { year: 1970, month: 1, day: 1 } }
+                    }
+                  }
+                }
+              }
+            }
+          },
           // Calculate total likes from reactions
           likes: {
             $sum: {
@@ -1490,20 +1626,29 @@ export const getTopRecipes = async (req, res) => {
               }
             ]
           },
-          // Get author info
+          // Get author info - ensure name is always a string
           author: {
             $let: {
               vars: {
                 author: { $arrayElemAt: ['$authorInfo', 0] }
               },
               in: {
-                name: { $ifNull: ['$$author.name', '$author'] },
+                name: {
+                  $toString: {
+                    $ifNull: [
+                      { $ifNull: ['$$author.name', null] },
+                      { $ifNull: ['$author', 'Unknown'] }
+                    ]
+                  }
+                },
                 avatar: { $ifNull: ['$$author.profile.avatar', null] }
               }
             }
           }
         }
       },
+      // Apply time range filter after date normalization if needed
+      ...(timeRangeFilter ? [{ $match: timeRangeFilter }] : []),
       {
         $project: {
           _id: 1,
@@ -1518,20 +1663,37 @@ export const getTopRecipes = async (req, res) => {
           nutrition: { $ifNull: ['$nutrition', {}] },
           tags: { $ifNull: ['$tags', []] },
           category: { $arrayElemAt: ['$tags', 0] },
+          // Use the author field already created in $addFields stage
+          // Ensure name is always a string using $toString
           author: {
             $cond: {
-              if: { $eq: [{ $size: '$authorInfo' }, 0] },
-              then: { name: '$author', avatar: null },
-              else: {
-                name: { $ifNull: [{ $arrayElemAt: ['$authorInfo.name', 0] }, '$author'] },
-                avatar: { $arrayElemAt: ['$authorInfo.profile.avatar', 0] }
-              }
+              if: { $ne: ['$author', null] },
+              then: {
+                name: {
+                  $toString: {
+                    $ifNull: [
+                      { $ifNull: ['$author.name', null] },
+                      { $ifNull: ['$author', 'Unknown'] }
+                    ]
+                  }
+                },
+                avatar: '$author.avatar'
+              },
+              else: { name: 'Unknown', avatar: null }
             }
           },
           createdAt: {
-            $dateToString: {
-              format: '%Y-%m-%d',
-              date: '$createdAt'
+            // createdAt is already normalized to Date in $addFields stage
+            // Format it as string, with fallback if somehow not a date
+            $cond: {
+              if: { $eq: [{ $type: '$createdAt' }, 'date'] },
+              then: {
+                $dateToString: {
+                  format: '%Y-%m-%d',
+                  date: '$createdAt'
+                }
+              },
+              else: '1970-01-01' // Fallback string if not a date
             }
           },
           trustScore: 1

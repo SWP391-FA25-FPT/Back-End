@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const connectDB = async () => {
   try {
     const conn = await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://localhost:27017/metameal", //Update your MongoDB Local
+      process.env.MONGODB_URI || "mongodb://localhost:27017/metameal", //mongodb+srv://phongltt0203:bonnehihi123@ecchan.za1shup.mongodb.net/metameal?retryWrites=true&w=majority&appName=ecchan
       {
         useNewUrlParser: true,
         useUnifiedTopology: true,
