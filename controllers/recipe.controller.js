@@ -1131,55 +1131,48 @@ export const getPendingRecipesAdmin = async (req, res) => {
     const { page = 1, limit = 10, status, search, category } = req.query;
 
     // Build query for pending recipes (only private status, exclude draft and rejected)
-    let query = {};
+    const conditions = [];
 
     // Filter by specific status if provided (only allow private or published)
     if (status && ['private', 'published'].includes(status)) {
-      query.status = status;
+      conditions.push({ status: status });
     } else {
       // Default: get private (pending) and published (approved) recipes, exclude draft and rejected
-      query.$and = [
-        {
-          $or: [
-            { status: 'private' },
-            { status: 'published' }
-          ]
-        },
-        { status: { $ne: 'rejected' } },
-        { status: { $ne: 'draft' } }
-      ];
+      conditions.push({
+        $or: [
+          { status: 'private' },
+          { status: 'published' }
+        ]
+      });
+      conditions.push({ status: { $ne: 'rejected' } });
+      conditions.push({ status: { $ne: 'draft' } });
     }
 
     // Search by name or description
     if (search && search.trim()) {
       const searchRegex = { $regex: search.trim(), $options: 'i' };
-      const searchConditions = [
-        { name: searchRegex },
-        { description: searchRegex }
-      ];
-      
-      if (query.$and) {
-        // If we have $and, add search condition to it
-        query.$and.push({ $or: searchConditions });
-      } else {
-        // If status filter is specific, combine with $and
-        const statusCondition = { status: query.status };
-        delete query.status;
-        query.$and = [
-          statusCondition,
-          { $or: searchConditions }
-        ];
-      }
+      conditions.push({
+        $or: [
+          { name: searchRegex },
+          { description: searchRegex }
+        ]
+      });
     }
 
     // Filter by tags (category)
     if (category && category.trim()) {
-      query.tags = { $in: [category.trim()] };
+      conditions.push({ tags: { $in: [category.trim()] } });
     }
+
+    // Build final query
+    const query = conditions.length === 1 ? conditions[0] : { $and: conditions };
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
+
+    // Debug: Log query to verify filter is correct
+    console.log('Admin moderation query:', JSON.stringify(query, null, 2));
 
     // Get total count
     const total = await Recipe.countDocuments(query);
