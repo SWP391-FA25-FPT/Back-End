@@ -56,12 +56,27 @@ export const createRecipe = async (req, res) => {
     // Validate based on status
     const recipeStatus = status || 'draft';
     
-    if (recipeStatus === 'published') {
-      // Validate required fields for published recipes
+    // Parse JSON fields if they are strings
+    const parsedIngredients = typeof ingredients === 'string' ? JSON.parse(ingredients) : ingredients;
+    const parsedSteps = typeof steps === 'string' ? JSON.parse(steps) : steps;
+    const parsedTags = typeof tags === 'string' ? JSON.parse(tags) : tags;
+    const parsedNutrition = typeof nutrition === 'string' ? JSON.parse(nutrition) : nutrition;
+    const parsedTips = typeof tips === 'string' ? JSON.parse(tips) : tips;
+    
+    if (recipeStatus === 'published' || recipeStatus === 'private') {
+      // Validate required fields for published/private recipes
       if (!name || !description || !servings) {
         return res.status(400).json({
           success: false,
           error: 'Vui lòng cung cấp đầy đủ thông tin: tên, mô tả và số khẩu phần'
+        });
+      }
+      
+      // Validate tags - must have at least 1 tag
+      if (!parsedTags || !Array.isArray(parsedTags) || parsedTags.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Vui lòng thêm ít nhất một tag cho công thức'
         });
       }
     }
@@ -79,13 +94,6 @@ export const createRecipe = async (req, res) => {
         error: 'Vui lòng upload ảnh chính cho công thức'
       });
     }
-
-    // Parse JSON fields if they are strings
-    const parsedIngredients = typeof ingredients === 'string' ? JSON.parse(ingredients) : ingredients;
-    const parsedSteps = typeof steps === 'string' ? JSON.parse(steps) : steps;
-    const parsedTags = typeof tags === 'string' ? JSON.parse(tags) : tags;
-    const parsedNutrition = typeof nutrition === 'string' ? JSON.parse(nutrition) : nutrition;
-    const parsedTips = typeof tips === 'string' ? JSON.parse(tips) : tips;
 
     // Map step images if uploaded
     if (req.files && req.files.stepImages && parsedSteps) {
@@ -364,6 +372,16 @@ export const updateRecipe = async (req, res) => {
     // Handle JSON fields
     if (tags) {
       recipe.tags = typeof tags === 'string' ? JSON.parse(tags) : tags;
+    }
+    
+    // Validate tags if status is published or private
+    const finalStatus = status || recipe.status;
+    if ((finalStatus === 'published' || finalStatus === 'private') && 
+        (!recipe.tags || !Array.isArray(recipe.tags) || recipe.tags.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Vui lòng thêm ít nhất một tag cho công thức'
+      });
     }
     if (ingredients) {
       recipe.ingredients = typeof ingredients === 'string' ? JSON.parse(ingredients) : ingredients;
@@ -1112,23 +1130,23 @@ export const getPendingRecipesAdmin = async (req, res) => {
   try {
     const { page = 1, limit = 10, status, search, category } = req.query;
 
-    // Build query for pending recipes (draft or private status, exclude rejected)
+    // Build query for pending recipes (only private status, exclude draft and rejected)
     let query = {};
 
-    // Filter by specific status if provided
-    if (status && ['draft', 'private'].includes(status)) {
-      // Specific status filter, exclude rejected
+    // Filter by specific status if provided (only allow private or published)
+    if (status && ['private', 'published'].includes(status)) {
       query.status = status;
     } else {
-      // Default: get both draft and private (exclude rejected)
+      // Default: get private (pending) and published (approved) recipes, exclude draft and rejected
       query.$and = [
         {
           $or: [
-            { status: 'draft' },
-            { status: 'private' }
+            { status: 'private' },
+            { status: 'published' }
           ]
         },
-        { status: { $ne: 'rejected' } }
+        { status: { $ne: 'rejected' } },
+        { status: { $ne: 'draft' } }
       ];
     }
 
@@ -1289,38 +1307,21 @@ export const rejectRecipeAdmin = async (req, res) => {
 // @access  Private (Admin only)
 export const getModerationStatsAdmin = async (req, res) => {
   try {
+    // Only count private (pending) recipes, exclude draft
     const pendingCount = await Recipe.countDocuments({
       $and: [
-        { $or: [{ status: 'draft' }, { status: 'private' }] },
-        { status: { $ne: 'rejected' } }
-      ]
-    });
-    const draftCount = await Recipe.countDocuments({ status: 'draft' });
-    const privateCount = await Recipe.countDocuments({ status: 'private' });
-    const publishedCount = await Recipe.countDocuments({ status: 'published' });
-
-    // Get recipes by priority (based on views or saves, exclude rejected)
-    const highPriorityCount = await Recipe.countDocuments({
-      $and: [
-        { $or: [{ status: 'draft' }, { status: 'private' }] },
+        { status: 'private' },
         { status: { $ne: 'rejected' } },
-        {
-          $or: [
-            { views: { $gte: 100 } },
-            { saves: { $gte: 50 } }
-          ]
-        }
+        { status: { $ne: 'draft' } }
       ]
     });
+    const publishedCount = await Recipe.countDocuments({ status: 'published' });
 
     res.status(200).json({
       success: true,
       data: {
         pending: pendingCount,
-        draft: draftCount,
-        private: privateCount,
-        published: publishedCount,
-        highPriority: highPriorityCount
+        published: publishedCount
       }
     });
   } catch (error) {

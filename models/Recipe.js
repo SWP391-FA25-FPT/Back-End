@@ -121,6 +121,9 @@ recipeSchema.pre("save", function (next) {
     if (!this.steps || this.steps.length === 0) {
       return next(new Error("Các bước thực hiện là bắt buộc"));
     }
+    if (!this.tags || !Array.isArray(this.tags) || this.tags.length === 0) {
+      return next(new Error("Ít nhất một tag là bắt buộc"));
+    }
   }
   next();
 });
