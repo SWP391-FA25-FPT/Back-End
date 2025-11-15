@@ -1,4 +1,5 @@
 import Blog from "../models/Blog.js";
+import Recipe from "../models/Recipe.js";
 import { cloudinary } from "../config/cloudinary.js";
 import mongoose from "mongoose";
 import { sendNotification } from "../utils/notificationService.js";
@@ -284,6 +285,60 @@ export const getAllBlogs = async (req, res) => {
   }
 };
 
+// Helper function to sanitize date fields from MongoDB Extended JSON format
+// Converts dates to ISO strings to avoid validation issues
+const sanitizeBlogDates = (blog) => {
+  if (!blog) return blog;
+
+  try {
+    // Fix top-level date fields - convert to ISO string
+    const dateFields = ['createdAt', 'updatedAt', 'publishedAt', 'rejectedAt'];
+    dateFields.forEach(field => {
+      if (blog[field]) {
+        if (typeof blog[field] === 'object' && blog[field].$date) {
+          // MongoDB Extended JSON format
+          blog[field] = new Date(blog[field].$date).toISOString();
+        } else if (blog[field] instanceof Date) {
+          // Already a Date object
+          blog[field] = blog[field].toISOString();
+        }
+      }
+    });
+
+    // Fix comments dates recursively - convert to ISO strings
+    if (blog.comments && Array.isArray(blog.comments)) {
+      blog.comments = blog.comments.map(comment => {
+        if (comment.createdAt) {
+          if (typeof comment.createdAt === 'object' && comment.createdAt.$date) {
+            comment.createdAt = new Date(comment.createdAt.$date).toISOString();
+          } else if (comment.createdAt instanceof Date) {
+            comment.createdAt = comment.createdAt.toISOString();
+          }
+        }
+        // Fix replies dates recursively
+        if (comment.replies && Array.isArray(comment.replies)) {
+          comment.replies = comment.replies.map(reply => {
+            if (reply.createdAt) {
+              if (typeof reply.createdAt === 'object' && reply.createdAt.$date) {
+                reply.createdAt = new Date(reply.createdAt.$date).toISOString();
+              } else if (reply.createdAt instanceof Date) {
+                reply.createdAt = reply.createdAt.toISOString();
+              }
+            }
+            return reply;
+          });
+        }
+        return comment;
+      });
+    }
+  } catch (error) {
+    console.error("Error sanitizing blog dates:", error);
+    // Return blog as-is if sanitization fails
+  }
+
+  return blog;
+};
+
 // @desc    Get single blog by ID or slug
 // @route   GET /api/blogs/:id
 // @access  Public (with restrictions based on published status)
@@ -291,8 +346,20 @@ export const getBlogById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Try to find by ID first, then by slug
-    let blog = (await Blog.findById(id)) || (await Blog.findOne({ slug: id }));
+    // Try to find by ID first, then by slug - use lean() to avoid validation
+    let blog;
+    try {
+      blog = await Blog.findById(id).lean();
+      if (!blog) {
+        blog = await Blog.findOne({ slug: id }).lean();
+      }
+    } catch (findError) {
+      console.error("Error finding blog:", findError);
+      return res.status(500).json({
+        success: false,
+        error: "Lỗi khi tìm blog",
+      });
+    }
 
     if (!blog) {
       return res.status(404).json({
@@ -301,13 +368,12 @@ export const getBlogById = async (req, res) => {
       });
     }
 
-    // Increment views
-    blog.views = (blog.views || 0) + 1;
-    await blog.save();
-
-    // Populate relatedRecipes after saving
-    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
-      await Blog.populate(blog, { path: "relatedRecipes" });
+    // Sanitize date fields before any operations - convert to ISO strings
+    try {
+      blog = sanitizeBlogDates(blog);
+    } catch (sanitizeError) {
+      console.error("Error sanitizing blog dates:", sanitizeError);
+      // Continue even if sanitization fails
     }
 
     // Check access permissions based on blog status
@@ -328,9 +394,55 @@ export const getBlogById = async (req, res) => {
       }
     }
 
+    // Increment views using raw MongoDB update to completely bypass Mongoose validation
+    // This is the safest way to avoid any validation issues
+    try {
+      await Blog.collection.updateOne(
+        { _id: new mongoose.Types.ObjectId(blog._id) },
+        { $inc: { views: 1 } }
+      );
+      // Update the local blog object for response
+      blog.views = (blog.views || 0) + 1;
+    } catch (updateError) {
+      // If update fails, log but continue - don't block the response
+      console.error("Error incrementing views:", updateError);
+      // Still increment locally for response
+      blog.views = (blog.views || 0) + 1;
+    }
+
+    // Manually populate relatedRecipes if needed (since we're using lean())
+    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
+      const recipes = await Recipe.find({ 
+        _id: { $in: blog.relatedRecipes } 
+      }).lean();
+      blog.relatedRecipes = recipes;
+    }
+
+    // Convert to plain object to ensure no Mongoose document methods remain
+    // This prevents any validation from being triggered during JSON serialization
+    // Use a custom replacer to handle any remaining issues
+    let plainBlog;
+    try {
+      plainBlog = JSON.parse(JSON.stringify(blog, (key, value) => {
+        // Convert any remaining Date objects to ISO strings
+        if (value instanceof Date) {
+          return value.toISOString();
+        }
+        // Convert MongoDB Extended JSON format if still present
+        if (value && typeof value === 'object' && value.$date) {
+          return new Date(value.$date).toISOString();
+        }
+        return value;
+      }));
+    } catch (serializeError) {
+      console.error("Error serializing blog:", serializeError);
+      // Fallback: return blog as-is (should already be sanitized)
+      plainBlog = blog;
+    }
+
     res.status(200).json({
       success: true,
-      data: blog,
+      data: plainBlog,
     });
   } catch (error) {
     console.error("Get blog by ID error:", error);

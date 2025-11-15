@@ -19,7 +19,6 @@ import progressTrackingRoutes from "./routes/progressTracking.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import feedbackRoutes from "./routes/feedback.routes.js";
-import reportRoutes from "./routes/report.routes.js";
 import nutritionRoutes from "./routes/nutrition.routes.js";
 import paypalRoutes from "./routes/paypal.routes.js";
 import notificationRoutes from "./routes/notification.route.js";
@@ -77,9 +76,6 @@ app.use("/api/admin", adminRoutes);
 
 // Feedback routes
 app.use("/api/feedback", feedbackRoutes);
-
-// Report routes
-app.use("/api/report", reportRoutes);
 
 // PayPal payment routes
 app.use("/api/paypal", paypalRoutes);

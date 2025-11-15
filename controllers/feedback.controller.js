@@ -5,7 +5,7 @@ import Feedback from '../models/Feedback.js';
 // @access  Private
 export const createFeedback = async (req, res) => {
   try {
-    const { type, subject, message, priority, challengeId } = req.body;
+    const { type, subject, message, challengeId } = req.body;
 
     if (!subject || !message) {
       return res.status(400).json({
@@ -21,7 +21,6 @@ export const createFeedback = async (req, res) => {
       type: type || 'other',
       subject,
       message,
-      priority: priority || 'medium',
       challengeId: challengeId || undefined,
     });
 
@@ -44,7 +43,7 @@ export const createFeedback = async (req, res) => {
 // @access  Private (Admin only)
 export const getAllFeedbacksAdmin = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, type, priority } = req.query;
+    const { page = 1, limit = 20, status, type } = req.query;
 
     const query = {};
 
@@ -53,9 +52,6 @@ export const getAllFeedbacksAdmin = async (req, res) => {
     }
     if (type) {
       query.type = type;
-    }
-    if (priority) {
-      query.priority = priority;
     }
 
     const pageNum = parseInt(page);
