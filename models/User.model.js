@@ -19,7 +19,8 @@ const UserSchema = new mongoose.Schema({
       weight: Number,
       height: Number,
       gender: { type: String, enum: ['male', 'female', 'other'] },
-      age: Number,
+      age: Number, // Keep for backward compatibility, will be calculated from dateOfBirth
+      dateOfBirth: Date, // New field: date of birth
       workHabits: { type: String, enum: ['sedentary', 'light', 'moderate', 'active', 'very active'] },
       eatingHabits: { type: String, enum: ['light', 'moderate', 'heavy', 'snacker'] },
       diet: { type: String, enum: ['none', 'vegan', 'vegetarian', 'keto', 'paleo', 'gluten-free'] },
