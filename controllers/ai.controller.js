@@ -162,9 +162,19 @@ export const chatWithAI = async (req, res) => {
 
         // Send enriched message
         console.log("📤 Sending enriched message with context...");
+        console.log(`📏 Message length: ${enrichedMessage.length} characters`);
+        
         const result = await chat.sendMessage(enrichedMessage);
         const response = await result.response;
-        aiResponse = response.text();
+        const responseText = response.text();
+        
+        if (!responseText || responseText.trim() === "") {
+          console.warn(`⚠️ Model ${modelName} returned empty response`);
+          throw new Error("Empty response from AI");
+        }
+        
+        aiResponse = responseText;
+        console.log(`✅ Got valid response: ${aiResponse.substring(0, 100)}...`);
 
         // Persist user & AI messages to Qdrant (best-effort)
         try {

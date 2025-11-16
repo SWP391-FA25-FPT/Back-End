@@ -61,24 +61,32 @@ export function extractUserPreferences(conversationHistory = []) {
 
     // Extract ingredient preferences (simple pattern matching)
     // Look for phrases like "có gà", "không có sữa", "with chicken", "without milk"
+    // Vietnamese stopwords to filter out
+    const stopwords = [
+      'thể', 'một', 'bất', 'món', 'nhiều', 'những', 'chia', 'muốn', 'hỏi',
+      'hãy', 'thích', 'với', 'được', 'cần', 'phải', 'nên', 'đang', 'sẽ',
+      'này', 'đó', 'các', 'của', 'cho', 'từ', 'trong', 'ngoài', 'trên',
+      'dưới', 'về', 'đến', 'và', 'hoặc', 'nhưng', 'mà', 'nếu', 'vì'
+    ];
+
     const ingredientPatterns = [
-      /(?:có|with|add|thêm)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ\s]+?)(?:\s|,|$)/gi,
-      /(?:không có|không|without|no|exclude|bỏ)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ\s]+?)(?:\s|,|$)/gi,
+      /(?:có|with|add|thêm)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]{3,})/gi,
+      /(?:không có|không|without|no|exclude|bỏ)\s+([a-zàáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]{3,})/gi,
     ];
 
     let match;
     // Include ingredients
     while ((match = ingredientPatterns[0].exec(content)) !== null) {
-      const ingredient = match[1].trim();
-      if (ingredient.length > 2 && ingredient.length < 30) {
+      const ingredient = match[1].trim().toLowerCase();
+      if (ingredient.length >= 3 && ingredient.length < 20 && !stopwords.includes(ingredient)) {
         preferences.includeIngredients.add(ingredient);
       }
     }
 
     // Exclude ingredients
     while ((match = ingredientPatterns[1].exec(content)) !== null) {
-      const ingredient = match[1].trim();
-      if (ingredient.length > 2 && ingredient.length < 30) {
+      const ingredient = match[1].trim().toLowerCase();
+      if (ingredient.length >= 3 && ingredient.length < 20 && !stopwords.includes(ingredient)) {
         preferences.excludeIngredients.add(ingredient);
       }
     }
@@ -146,7 +154,7 @@ export function extractSearchCriteria(message = "", historicalPreferences = {}) 
     maxCalories: historicalPreferences.maxCalories || null,
     minProtein: historicalPreferences.minProtein || null,
     sortBy: "trustScore", // Default to trusted recipes
-    limit: 10,
+    limit: 5, // Limit to 5 to avoid long messages
   };
 
   // Tag keywords
@@ -194,7 +202,7 @@ export async function searchRecipesForAI(criteria = {}) {
       maxCalories = null,
       minProtein = null,
       sortBy = "trustScore",
-      limit = 10,
+      limit = 5,
     } = criteria;
 
     // Build MongoDB query
@@ -301,10 +309,13 @@ export function formatRecipeListForAI(recipes = []) {
     return null;
   }
 
+  // Limit to top 5 recipes to avoid message being too long
+  const topRecipes = recipes.slice(0, 5);
+
   let formatted = "\n\n=== CÔNG THỨC KHẢ DỤNG TRONG DATABASE ===\n";
   formatted += "Dưới đây là các công thức nấu ăn phù hợp từ database. Hãy giới thiệu những món này cho người dùng một cách thân thiện và hữu ích:\n\n";
 
-  recipes.forEach((recipe, index) => {
+  topRecipes.forEach((recipe, index) => {
     formatted += `${index + 1}. ${formatRecipeSummary(recipe)}\n`;
   });
 
