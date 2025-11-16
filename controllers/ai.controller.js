@@ -17,7 +17,17 @@ import {
   listRecentMessages,
   listUserConversations,
   getConversationMessages,
+  extractConversationContext,
 } from "../utils/qdrant.js";
+
+import {
+  detectRecipeRequest,
+  extractUserPreferences,
+  extractSearchCriteria,
+  searchRecipesForAI,
+  formatRecipeListForAI,
+  buildContextSummary,
+} from "../utils/recipeAI.js";
 
 export const chatWithAI = async (req, res) => {
   try {
@@ -45,6 +55,56 @@ export const chatWithAI = async (req, res) => {
     let lastError = null;
     let aiResponse = null;
 
+    // Load conversation history for context analysis
+    let fullConversationHistory = conversationHistory;
+    if (userId && conversationId && conversationHistory.length === 0) {
+      try {
+        const recentMessages = await listRecentMessages({
+          conversationId,
+          limit: 30,
+        });
+        fullConversationHistory = recentMessages.map((msg) => ({
+          type: msg.role === "user" ? "user" : "ai",
+          content: msg.content,
+          role: msg.role,
+        }));
+      } catch (loadErr) {
+        console.warn("Load history for context warning:", loadErr?.message || loadErr);
+      }
+    }
+
+    // === RECIPE INTELLIGENCE ===
+    // Extract user preferences from full conversation history
+    const userPreferences = extractUserPreferences(fullConversationHistory);
+    console.log("👤 User preferences extracted:", userPreferences);
+
+    // Detect if user is requesting recipe suggestions
+    const isRecipeRequest = detectRecipeRequest(message);
+    console.log("🍳 Recipe request detected:", isRecipeRequest);
+
+    // Search for relevant recipes if needed
+    let recipes = [];
+    let recipeContext = "";
+    let userContextSummary = "";
+
+    if (isRecipeRequest) {
+      // Extract search criteria from current message + historical preferences
+      const searchCriteria = extractSearchCriteria(message, userPreferences);
+      console.log("🔍 Search criteria:", searchCriteria);
+
+      // Query database for matching recipes
+      recipes = await searchRecipesForAI(searchCriteria);
+      console.log(`✅ Found ${recipes.length} matching recipes`);
+
+      // Format recipes for AI context
+      if (recipes.length > 0) {
+        recipeContext = formatRecipeListForAI(recipes);
+      }
+
+      // Build user context summary
+      userContextSummary = buildContextSummary(userPreferences);
+    }
+
     // Try each model until one works
     for (const modelName of modelsToTry) {
       try {
@@ -66,50 +126,43 @@ export const chatWithAI = async (req, res) => {
             parts: [
               {
                 text: INITIAL_AI_RESPONSE,
-                text: INITIAL_AI_RESPONSE,
               },
             ],
           },
         ];
 
         // Add conversation history
-        if (conversationHistory && conversationHistory.length > 0) {
-          conversationHistory.forEach((msg) => {
+        if (fullConversationHistory && fullConversationHistory.length > 0) {
+          fullConversationHistory.forEach((msg) => {
             history.push({
-              role: msg.type === "user" ? "user" : "model",
+              role: msg.type === "user" || msg.role === "user" ? "user" : "model",
               parts: [{ text: msg.content }],
             });
           });
-        } else if (userId && conversationId) {
-          // If client didn't send history, try load recent messages from Qdrant
-          try {
-            const recent = await listRecentMessages({
-              conversationId,
-              limit: 30,
-            });
-            recent.forEach((msg) => {
-              history.push({
-                role: msg.role === "user" ? "user" : "model",
-                parts: [{ text: msg.content }],
-              });
-            });
-          } catch (loadErr) {
-            console.warn(
-              "Qdrant load history warning:",
-              loadErr?.message || loadErr
-            );
-          }
         }
 
         // Create chat
         const chat = model.startChat({
           history: history,
           generationConfig: GENERATION_CONFIG,
-          generationConfig: GENERATION_CONFIG,
         });
 
-        // Send message
-        const result = await chat.sendMessage(message);
+        // Build enriched message with context and recipes
+        let enrichedMessage = message;
+        
+        // Add user context summary if available
+        if (userContextSummary) {
+          enrichedMessage = userContextSummary + enrichedMessage;
+        }
+        
+        // Add recipe context if available
+        if (recipeContext) {
+          enrichedMessage = enrichedMessage + recipeContext;
+        }
+
+        // Send enriched message
+        console.log("📤 Sending enriched message with context...");
+        const result = await chat.sendMessage(enrichedMessage);
         const response = await result.response;
         aiResponse = response.text();
 
