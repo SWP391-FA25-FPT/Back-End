@@ -1,3 +1,5 @@
+// src/utils/notificationService.js
+
 import Notification from '../models/Notification.js';
 
 const defaultTitles = {
@@ -8,7 +10,11 @@ const defaultTitles = {
   admin: 'Thông báo từ quản trị viên',
   system: 'Thông báo',
   blog_approved: 'Blog đã được duyệt',
-  blog_rejected: 'Blog bị từ chối'
+  blog_rejected: 'Blog bị từ chối',
+  // THÊM TIÊU ĐỀ MẶC ĐỊNH CHO BẠN BÈ
+  friend_request: 'Lời mời kết bạn mới',
+  friend_accept: 'Chấp nhận kết bạn',
+  friend_decline: 'Lời mời bị từ chối'
 };
 
 export const sendNotification = async ({
@@ -32,6 +38,7 @@ export const sendNotification = async ({
       recipe: recipeId ?? undefined,
       blog: blogId ?? undefined,
       type,
+      // Sử dụng tiêu đề truyền vào, nếu không có thì lấy từ defaultTitles
       title: title || defaultTitles[type] || defaultTitles.system,
       message,
       metadata
@@ -59,18 +66,18 @@ export const sendBulkNotifications = async ({
   }
 
   try {
-    const notifications = await Notification.insertMany(
-      userIds.map((user) => ({
-        user,
-        actor: actorId ?? undefined,
-        recipe: recipeId ?? undefined,
-        blog: blogId ?? undefined,
-        type,
-        title: title || defaultTitles[type] || defaultTitles.system,
-        message,
-        metadata
-      }))
-    );
+    const bulkNotifications = userIds.map((user) => ({
+      user,
+      actor: actorId ?? undefined,
+      recipe: recipeId ?? undefined,
+      blog: blogId ?? undefined,
+      type,
+      title: title || defaultTitles[type] || defaultTitles.system,
+      message,
+      metadata
+    }));
+    
+    const notifications = await Notification.insertMany(bulkNotifications);
 
     return notifications;
   } catch (error) {
@@ -78,5 +85,3 @@ export const sendBulkNotifications = async ({
     return [];
   }
 };
-
-

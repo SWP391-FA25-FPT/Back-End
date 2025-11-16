@@ -1,3 +1,5 @@
+// src/models/Notification.js
+
 import mongoose from 'mongoose';
 
 const notificationSchema = new mongoose.Schema(
@@ -16,14 +18,28 @@ const notificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Recipe'
     },
-    type: {
-      type: String,
-      enum: ['recipe_publish', 'comment', 'rating', 'reaction', 'admin', 'system', 'blog_approved', 'blog_rejected', 'challenge_winner'],
-      default: 'system'
-    },
     blog: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Blog'
+    },
+    // Trường type: Thêm các loại thông báo bạn bè vào enum
+    type: {
+      type: String,
+      enum: [
+        'recipe_publish',
+        'comment', 
+        'rating', 
+        'reaction', 
+        'admin', 
+        'system', 
+        'blog_approved', 
+        'blog_rejected', 
+        'challenge_winner',
+        'friend_request',   // ⬅️ THÊM
+        'friend_accept',    // ⬅️ THÊM
+        'friend_decline'    // ⬅️ THÊM
+      ],
+      default: 'system'
     },
     title: {
       type: String,
@@ -52,12 +68,6 @@ notificationSchema.virtual('isRead').get(function () {
   return Boolean(this.readAt);
 });
 
-notificationSchema.index({ user: 1, createdAt: -1 });
-notificationSchema.index({ user: 1, readAt: 1 });
-
-const Notification =
-  mongoose.models.Notification || mongoose.model('Notification', notificationSchema);
+const Notification = mongoose.models.Notification || mongoose.model('Notification', notificationSchema);
 
 export default Notification;
-
-

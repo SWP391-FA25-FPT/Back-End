@@ -1,6 +1,7 @@
 import User from '../models/User.model.js';
 import Recipe from '../models/Recipe.js';
 import { sendNotification } from '../utils/notificationService.js';
+import FriendRequest from '../models/FriendRequest.model.js'; // Đã import chính xác
 
 const ensureProfileObject = (profile) =>
   profile && typeof profile === 'object' ? profile : {};
@@ -67,6 +68,7 @@ const formatRecipeCard = (recipe, explicitAuthorInfo = null) => {
   };
 };
 
+// @desc    Xây dựng Payload hồ sơ người dùng (ĐÃ SỬA LOGIC FRIEND STATUS)
 const buildProfilePayload = async (targetUserId, viewerId) => {
   const user = await User.findById(targetUserId).select('-password').lean();
 
@@ -82,6 +84,38 @@ const buildProfilePayload = async (targetUserId, viewerId) => {
 
   const isOwnProfile =
     viewerId && viewerId.toString() === user._id.toString();
+
+  // === LOGIC TÍNH TOÁN TRẠNG THÁI QUAN HỆ (ĐÃ BỔ SUNG) ===
+  let friendshipStatus = 'none'; // <-- Mặc định là 'none'
+  let friendshipRequestId = null;
+
+  if (isOwnProfile) {
+    friendshipStatus = 'self';
+  } else if (viewerId) {
+    // 1. Check xem đã là bạn bè chưa
+    if (friendIds.some(friendId => friendId.toString() === viewerId.toString())) {
+      friendshipStatus = 'friends';
+    } else {
+      // 2. Nếu chưa, check xem có friend request nào đang chờ không
+      const pendingRequest = await FriendRequest.findOne({
+        $or: [
+          { sender: viewerId, recipient: targetUserId, status: 'pending' },
+          { sender: targetUserId, recipient: viewerId, status: 'pending' }
+        ]
+      }).select('_id sender').lean(); 
+
+      if (pendingRequest) {
+        friendshipRequestId = pendingRequest._id;
+        if (pendingRequest.sender.toString() === viewerId.toString()) {
+          friendshipStatus = 'pending_sent'; // Mình đã gửi
+        } else {
+          friendshipStatus = 'pending_received'; // Mình nhận được
+        }
+      }
+      // Nếu không 'friends' và cũng không 'pending', nó sẽ giữ nguyên là 'none'
+    }
+  }
+  // === KẾT THÚC LOGIC TÍNH TOÁN ===
 
   const [friendsDocs, followersDocs, publishedRecipes, savedRecipesDocs] = await Promise.all([
     friendIds.length
@@ -138,6 +172,8 @@ const buildProfilePayload = async (targetUserId, viewerId) => {
     recipes: publishedFormatted,
     savedRecipes: savedFormatted,
     isOwnProfile,
+    friendshipStatus, // TRẢ VỀ CHO FRONTEND
+    friendshipRequestId: friendshipRequestId, // TRẢ VỀ CHO FRONTEND
   };
 };
 
@@ -158,7 +194,7 @@ export const getProfile = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: payload,
+      data: payload, // Payload này giờ đã CÓ friendshipStatus
     });
   } catch (error) {
     console.error('Get profile error:', error);
@@ -712,4 +748,3 @@ export const getUserStatsAdmin = async (req, res) => {
     });
   }
 };
-
