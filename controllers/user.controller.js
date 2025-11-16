@@ -219,6 +219,7 @@ export const updateProfile = async (req, res) => {
         'diet',
         'allergies',
         'meals',
+        'knowledgeSource',
         'profileImageUrl',
       ];
 
@@ -263,8 +264,12 @@ export const updateProfile = async (req, res) => {
       diet,
       allergies,
       meals,
+      knowledgeSource,
       profileImageUrl,
     } = profilePayload;
+
+    // Debug: Log knowledgeSource to verify it's being received
+    console.log('Profile payload knowledgeSource:', knowledgeSource);
 
     const user = await User.findById(targetUserId);
 
@@ -336,6 +341,12 @@ export const updateProfile = async (req, res) => {
     if (diet) user.profile.diet = diet;
     if (normalizedAllergies) user.profile.allergies = normalizedAllergies;
     if (normalizedMeals) user.profile.meals = normalizedMeals;
+    if (knowledgeSource !== undefined && knowledgeSource !== null && knowledgeSource !== '') {
+      user.profile.knowledgeSource = knowledgeSource;
+      console.log('Saved knowledgeSource to user profile:', knowledgeSource);
+    } else {
+      console.log('knowledgeSource not saved - value:', knowledgeSource);
+    }
 
     if (req.file && req.file.path) {
       user.profile.profileImageUrl = req.file.path;
