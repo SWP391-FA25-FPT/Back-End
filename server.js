@@ -1,6 +1,12 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+
+// === THÊM VÀO: Import HTTP và Socket.IO ===
+import http from "http";
+import { Server } from "socket.io";
+// === KẾT THÚC THÊM VÀO ===
+
 import connectDB from "./config/db.js";
 import { connectCloudinary } from "./config/cloudinary.js";
 import { checkEdamamStatus } from "./config/edamam.config.js";
@@ -24,6 +30,9 @@ import paypalRoutes from "./routes/paypal.routes.js";
 import notificationRoutes from "./routes/notification.route.js";
 import challengeRoutes from "./routes/challenge.routes.js";
 
+// Import router chat duy nhất của bạn
+import chatRoutes from "./routes/message.routes.js"; 
+
 // Load environment variables
 dotenv.config();
 
@@ -33,6 +42,53 @@ connectCloudinary();
 checkEdamamStatus();
 
 const app = express();
+
+// === THÊM VÀO: Khởi tạo HTTP Server và Socket.IO ===
+const httpServer = http.createServer(app); 
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*", // Cho phép mọi nguồn (sau này nên đổi thành URL frontend)
+    methods: ["GET", "POST"]
+  }
+});
+
+// Gán io và activeUsers vào global để Controller có thể truy cập
+// (message.controller.js của bạn đang cần 2 biến này)
+global.io = io; 
+global.activeUsers = new Map(); // Map: key=userId, value=socketId
+
+// Xử lý logic Socket.IO
+io.on("connection", (socket) => {
+  console.log(`Một người dùng đã kết nối: ${socket.id}`);
+
+  // Lắng nghe sự kiện "join" (hoặc tên gì đó bạn đặt ở frontend)
+  socket.on("join", (userId) => {
+    if (userId) {
+        console.log(`User ${userId} đã tham gia với socket ${socket.id}`);
+        global.activeUsers.set(userId, socket.id);
+        
+        // Phát sự kiện cho mọi người biết danh sách user đang online
+        io.emit("activeUsersUpdate", Array.from(global.activeUsers.keys()));
+    }
+  });
+
+  // Xử lý khi client ngắt kết nối
+  socket.on("disconnect", () => {
+    console.log(`Người dùng đã ngắt kết nối: ${socket.id}`);
+    // Xóa user khỏi activeUsers
+    for (let [userId, socketId] of global.activeUsers.entries()) {
+      if (socketId === socket.id) {
+        global.activeUsers.delete(userId);
+        // Cập nhật lại danh sách online cho mọi người
+        io.emit("activeUsersUpdate", Array.from(global.activeUsers.keys()));
+        break;
+      }
+    }
+  });
+});
+// === KẾT THÚC THÊM VÀO ===
+
 
 // Middleware
 app.use(cors());
@@ -45,46 +101,25 @@ app.use("/api/user", userRoutes);
 app.use("/api/recipes", recipeRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/user/history", userHistoryRoutes);
-
-// Comment and Rating routes
 app.use("/api/comments", commentDeleteRouter);
 app.use("/api/ratings", ratingDeleteRouter);
-
-// Subscription routes
 app.use("/api/subscriptions", subscriptionRoutes);
-
-// AI routes
 app.use("/api/ai", aiRoutes);
-
-// Meal plan routes
 app.use("/api/mealplans", mealplanRoutes);
-
-// Goal routes
 app.use("/api/goals", goalRoutes);
-
-// Progress tracking routes
 app.use("/api/progress", progressTrackingRoutes);
-
-// Blog routes
 app.use("/api/blogs", blogRoutes);
-
-// Nutrition routes
 app.use("/api/nutrition", nutritionRoutes);
-
-// Admin routes
 app.use("/api/admin", adminRoutes);
-
-// Feedback routes
 app.use("/api/feedback", feedbackRoutes);
-
-// PayPal payment routes
 app.use("/api/paypal", paypalRoutes);
-
-// Notification routes
 app.use("/api/notifications", notificationRoutes);
-
-// Challenge routes
 app.use("/api/challenges", challengeRoutes);
+
+
+// === SỬA Ở ĐÂY: Gắn router chat vào đúng đường dẫn mà frontend đang gọi ===
+app.use("/api/conversations", chatRoutes); 
+
 
 // Status route
 app.get("/", async (req, res) => {
@@ -111,7 +146,6 @@ app.use((err, req, res, next) => {
   console.error("Request body:", req.body);
   console.error("Request file:", req.file);
   
-  // If response was already sent, don't send again
   if (res.headersSent) {
     return next(err);
   }
@@ -125,6 +159,7 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 7860;
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server is running on port ${PORT}`);
+// === SỬA Ở ĐÂY: Dùng httpServer.listen thay vì app.listen ===
+httpServer.listen(PORT, () => {
+  console.log(`🚀 Server (và Socket.IO) đang chạy trên cổng ${PORT}`);
 });
