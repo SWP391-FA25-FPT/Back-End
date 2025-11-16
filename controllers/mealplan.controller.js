@@ -66,7 +66,10 @@ const calculateDailyCalories = async (profile, userId = null, useGoalCalories = 
 // Helper function to select optimal recipes for a meal (1-2 dishes)
 // Returns array of meal objects that maximize calories while staying under maxCalories
 const selectOptimalMealRecipes = (recipes, maxCalories, mealType) => {
+  console.log(`[SELECT] Starting selection for ${mealType}, maxCalories: ${maxCalories}, available recipes: ${recipes.length}`);
+  
   if (!recipes || recipes.length === 0) {
+    console.error(`[SELECT] No recipes provided for ${mealType}`);
     return [];
   }
 
@@ -79,6 +82,8 @@ const selectOptimalMealRecipes = (recipes, maxCalories, mealType) => {
     .filter(r => r.calories > 0 && r.calories <= maxCalories) // Only consider recipes that fit
     .sort((a, b) => b.calories - a.calories); // Sort descending (prefer higher calories that fit)
 
+  console.log(`[SELECT] Valid recipes (calories > 0 and <= ${maxCalories}): ${validRecipes.length}`);
+
   if (validRecipes.length === 0) {
     // No recipes fit - try to find smallest recipe available
     const allRecipes = recipes
@@ -89,10 +94,12 @@ const selectOptimalMealRecipes = (recipes, maxCalories, mealType) => {
       .filter(r => r.calories > 0)
       .sort((a, b) => a.calories - b.calories); // Sort ascending to find smallest
     
+    console.log(`[SELECT] All recipes with calories > 0: ${allRecipes.length}`);
+    
     if (allRecipes.length > 0) {
-      console.warn(`Warning: No recipe fits maxCalories (${maxCalories}) for ${mealType}, using smallest available: ${allRecipes[0].calories}`);
+      console.warn(`[WARN] No recipe fits maxCalories (${maxCalories}) for ${mealType}, using smallest available: ${allRecipes[0].name} (${allRecipes[0].calories} cal)`);
       // Debug: log nutrition data
-      console.log('Recipe nutrition:', allRecipes[0].nutrition);
+      console.log('[SELECT] Recipe nutrition:', allRecipes[0].nutrition);
       return [{
         type: mealType,
         recipeId: allRecipes[0]._id,
@@ -109,6 +116,17 @@ const selectOptimalMealRecipes = (recipes, maxCalories, mealType) => {
         ingredients: allRecipes[0].ingredients || []
       }];
     }
+    
+    // Log sample recipe to debug nutrition data
+    if (recipes.length > 0) {
+      console.error(`[ERROR] No recipes have valid calories! Sample recipe:`, {
+        name: recipes[0].name,
+        nutrition: recipes[0].nutrition,
+        hasNutrition: !!recipes[0].nutrition,
+        caloriesValue: recipes[0].nutrition?.calories
+      });
+    }
+    
     return [];
   }
 
@@ -285,6 +303,8 @@ export const generateMealPlan = async (req, res) => {
     // useGoalCalories = false: Use BMR-based calories (Meal Plan Page)
     const dailyCalories = await calculateDailyCalories(user.profile, req.user._id, useGoalCalories);
     
+    console.log(`[GENERATE] Daily calories: ${dailyCalories}, User meals: ${meals}, Diet: ${diet || 'none'}, Allergies: ${allergies || 'none'}`);
+    
     // Sort meals to ensure snack is between lunch and dinner
     const sortedMeals = [...meals].sort((a, b) => {
       const order = { breakfast: 1, lunch: 2, snack: 3, dinner: 4 };
@@ -295,63 +315,65 @@ export const generateMealPlan = async (req, res) => {
     const mealTypes = sortedMeals.map(meal => meal.charAt(0).toUpperCase() + meal.slice(1));
     const mealTags = sortedMeals.map(meal => mealsMap[meal.toLowerCase()] || meal);
     
+    console.log(`[GENERATE] Meal types: ${mealTypes.join(', ')}, Tags: ${mealTags.join(', ')}`);
+    
     // Build recipe query
-    // For vegetarian or vegan diet, recipes must have "chay" tag
+    // ONLY filter by diet for vegetarian/vegan (require "chay" tag)
+    // Other diets (keto, paleo, etc.) are ignored
     let dietQuery = {};
-    if (diet && diet !== 'none') {
-      if (diet === 'vegetarian' || diet === 'vegan') {
-        // Require "chay" tag for vegetarian/vegan diets
-        dietQuery.tags = { $regex: new RegExp('chay', 'i') };
-      } else {
-        // For other diets (keto, paleo, gluten-free), use the diet name as tag
-        dietQuery.tags = diet;
-      }
+    if (diet && diet !== 'none' && (diet === 'vegetarian' || diet === 'vegan')) {
+      // Require "chay" tag for vegetarian/vegan diets only
+      dietQuery.tags = { $regex: new RegExp('chay', 'i') };
     }
     
-    const allergiesQuery = allergies && allergies.length > 0
-      ? { 'ingredients.name': { $nin: allergies } }
-      : {};
+    // FIXED: Check if allergies is a valid array and not "Không"
+    const allergiesQuery = 
+      Array.isArray(allergies) && 
+      allergies.length > 0 && 
+      !allergies.includes('Không') && 
+      !allergies.includes('không')
+        ? { 'ingredients.name': { $nin: allergies } }
+        : {};
     
     // Calculate calories per meal (distribute evenly, but allow flexibility)
     const caloriesPerMeal = Math.floor(dailyCalories / mealTypes.length);
     const mealPlansByType = {}; // Store meals by type to ensure each meal has at least 1 dish
+    
+    console.log(`[GENERATE] Calories per meal: ${caloriesPerMeal}`);
+
     
     // Fetch recipes for each meal type and select optimally
     for (let i = 0; i < mealTypes.length; i++) {
       const mealType = mealTypes[i];
       const mealTag = mealTags[i];
       
-      // Query recipes with case-insensitive tag matching
-      const normalizedTag = mealTag.toLowerCase();
+      console.log(`\n[GENERATE] Processing meal ${i+1}/${mealTypes.length}: ${mealType} (${mealTag})`);
       
-      // Build tag query - need to match both meal tag (sáng, trưa, tối) AND diet tag (chay) if applicable
+      // Build tag conditions - meal tag is required, "chay" tag is optional (vegetarian/vegan only)
+      const normalizedTag = mealTag.toLowerCase();
       const tagConditions = [
         { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') } } // Meal tag (sáng, trưa, tối)
       ];
       
-      // If diet requires "chay" tag, add it to conditions
+      // Add "chay" tag for vegetarian/vegan only
       if (dietQuery.tags && dietQuery.tags.$regex) {
-        tagConditions.push({ tags: { $regex: dietQuery.tags.$regex } }); // Diet tag (chay)
+        tagConditions.push({ tags: { $regex: dietQuery.tags.$regex } });
       }
-      
-      const tagQuery = tagConditions.length > 1 
-        ? { $and: tagConditions, status: 'published' } // Both meal and diet tags
-        : { ...tagConditions[0], status: 'published' }; // Only meal tag
       
       // Build final match query
       const matchQuery = {
         ...allergiesQuery,
-        ...tagQuery
+        status: 'published'
       };
       
-      // Remove tags from dietQuery if we're already handling it in tagQuery
-      if (dietQuery.tags && dietQuery.tags.$regex) {
-        // Diet tag already handled in tagQuery, don't include it twice
-      } else if (dietQuery.tags) {
-        // For other diets (keto, paleo, etc.), add to tagConditions
-        matchQuery.$and = matchQuery.$and || [];
-        matchQuery.$and.push({ tags: dietQuery.tags });
+      // Use $and only if multiple tag conditions, otherwise use simple tags query
+      if (tagConditions.length > 1) {
+        matchQuery.$and = tagConditions;
+      } else {
+        matchQuery.tags = tagConditions[0].tags;
       }
+      
+      console.log(`[GENERATE] Match query:`, JSON.stringify(matchQuery, null, 2));
       
       // Fetch multiple recipes to have options (20 recipes for better selection)
       // Include nutrition fields in projection to ensure we get fiber and sugar
@@ -367,21 +389,30 @@ export const generateMealPlan = async (req, res) => {
         }}
       ]);
       
+      console.log(`[GENERATE] Found ${recipesForMealType.length} recipes for ${mealType}`);
+      
       if (recipesForMealType.length === 0) {
+        console.error(`[ERROR] No recipes found for ${mealType} (${mealTag})`);
         return res.status(400).json({
           success: false,
-          error: `Không tìm thấy công thức cho ${mealType} (${mealTag})`
+          error: `Không tìm thấy công thức cho ${mealType} (${mealTag})`,
+          details: `Query: ${JSON.stringify(matchQuery)}`
         });
       }
       
       // Select optimal recipes for this meal (1-2 dishes) based on calories per meal
       // Try to get close to caloriesPerMeal but don't exceed
+      console.log(`[GENERATE] Selecting optimal meals, max calories: ${caloriesPerMeal}`);
       const selectedMeals = selectOptimalMealRecipes(recipesForMealType, caloriesPerMeal, mealType);
       
+      console.log(`[GENERATE] Selected ${selectedMeals.length} meals for ${mealType}`);
+      
       if (selectedMeals.length === 0) {
+        console.error(`[ERROR] No optimal meals selected for ${mealType}`);
         return res.status(400).json({
           success: false,
-          error: `Không thể chọn món phù hợp cho ${mealType}`
+          error: `Không thể chọn món phù hợp cho ${mealType}`,
+          details: `Calories per meal: ${caloriesPerMeal}, Available recipes: ${recipesForMealType.length}`
         });
       }
       
@@ -540,7 +571,7 @@ export const regenerateMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
+    const { weight, height, age, dateOfBirth, gender, workHabits, meals, diet, allergies } = user.profile;
     
     // Calculate daily calories
     // useGoalCalories = true: Use goal-based calories (Tracking Page)
@@ -560,21 +591,22 @@ export const regenerateMealPlan = async (req, res) => {
     const mealTags = sortedMeals.map(meal => mealsMap[meal.toLowerCase()] || meal);
     
     // Build recipe query
-    // For vegetarian or vegan diet, recipes must have "chay" tag
+    // ONLY filter by diet for vegetarian/vegan (require "chay" tag)
+    // Other diets (keto, paleo, etc.) are ignored
     let dietQuery = {};
-    if (diet && diet !== 'none') {
-      if (diet === 'vegetarian' || diet === 'vegan') {
-        // Require "chay" tag for vegetarian/vegan diets
-        dietQuery.tags = { $regex: new RegExp('chay', 'i') };
-      } else {
-        // For other diets (keto, paleo, gluten-free), use the diet name as tag
-        dietQuery.tags = diet;
-      }
+    if (diet && diet !== 'none' && (diet === 'vegetarian' || diet === 'vegan')) {
+      // Require "chay" tag for vegetarian/vegan diets only
+      dietQuery.tags = { $regex: new RegExp('chay', 'i') };
     }
     
-    const allergiesQuery = allergies && allergies.length > 0
-      ? { 'ingredients.name': { $nin: allergies } }
-      : {};
+    // FIXED: Check if allergies is a valid array and not "Không"
+    const allergiesQuery = 
+      Array.isArray(allergies) && 
+      allergies.length > 0 && 
+      !allergies.includes('Không') && 
+      !allergies.includes('không')
+        ? { 'ingredients.name': { $nin: allergies } }
+        : {};
     
     // Calculate calories per meal (distribute evenly, but allow flexibility)
     const caloriesPerMeal = Math.floor(dailyCalories / mealTypes.length);
@@ -585,36 +617,28 @@ export const regenerateMealPlan = async (req, res) => {
       const mealType = mealTypes[i];
       const mealTag = mealTags[i];
       
-      // Query recipes with case-insensitive tag matching
+      // Build tag conditions - meal tag is required, "chay" tag is optional (vegetarian/vegan only)
       const normalizedTag = mealTag.toLowerCase();
-      
-      // Build tag query - need to match both meal tag (sáng, trưa, tối) AND diet tag (chay) if applicable
       const tagConditions = [
         { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') } } // Meal tag (sáng, trưa, tối)
       ];
       
-      // If diet requires "chay" tag, add it to conditions
+      // Add "chay" tag for vegetarian/vegan only
       if (dietQuery.tags && dietQuery.tags.$regex) {
-        tagConditions.push({ tags: { $regex: dietQuery.tags.$regex } }); // Diet tag (chay)
+        tagConditions.push({ tags: { $regex: dietQuery.tags.$regex } });
       }
-      
-      const tagQuery = tagConditions.length > 1 
-        ? { $and: tagConditions, status: 'published' } // Both meal and diet tags
-        : { ...tagConditions[0], status: 'published' }; // Only meal tag
       
       // Build final match query
       const matchQuery = {
         ...allergiesQuery,
-        ...tagQuery
+        status: 'published'
       };
       
-      // Remove tags from dietQuery if we're already handling it in tagQuery
-      if (dietQuery.tags && dietQuery.tags.$regex) {
-        // Diet tag already handled in tagQuery, don't include it twice
-      } else if (dietQuery.tags) {
-        // For other diets (keto, paleo, etc.), add to tagConditions
-        matchQuery.$and = matchQuery.$and || [];
-        matchQuery.$and.push({ tags: dietQuery.tags });
+      // Use $and only if multiple tag conditions, otherwise use simple tags query
+      if (tagConditions.length > 1) {
+        matchQuery.$and = tagConditions;
+      } else {
+        matchQuery.tags = tagConditions[0].tags;
       }
       
       // Fetch multiple recipes to have options (20 recipes for better selection)
@@ -803,13 +827,16 @@ export const generateWeeklyMealPlan = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits, meals, diet, allergies } = user.profile;
+    const { weight, height, age, dateOfBirth, gender, workHabits, meals, diet, allergies } = user.profile;
+    
+    // Calculate age from dateOfBirth if age is not available
+    const userAge = calculateAge(age, dateOfBirth);
     
     // Validate required fields
     const missingFields = [];
     if (!weight) missingFields.push('cân nặng');
     if (!height) missingFields.push('chiều cao');
-    if (!age) missingFields.push('tuổi');
+    if (!userAge) missingFields.push('tuổi (hoặc ngày sinh)');
     if (!gender) missingFields.push('giới tính');
     if (!workHabits) missingFields.push('mức độ hoạt động');
     if (!meals || meals.length === 0) missingFields.push('sở thích bữa ăn');
@@ -831,21 +858,22 @@ export const generateWeeklyMealPlan = async (req, res) => {
     const mealTags = meals.map(meal => mealsMap[meal.toLowerCase()] || meal);
     
     // Build recipe query
-    // For vegetarian or vegan diet, recipes must have "chay" tag
+    // ONLY filter by diet for vegetarian/vegan (require "chay" tag)
+    // Other diets (keto, paleo, etc.) are ignored
     let dietQuery = {};
-    if (diet && diet !== 'none') {
-      if (diet === 'vegetarian' || diet === 'vegan') {
-        // Require "chay" tag for vegetarian/vegan diets
-        dietQuery.tags = { $regex: new RegExp('chay', 'i') };
-      } else {
-        // For other diets (keto, paleo, gluten-free), use the diet name as tag
-        dietQuery.tags = diet;
-      }
+    if (diet && diet !== 'none' && (diet === 'vegetarian' || diet === 'vegan')) {
+      // Require "chay" tag for vegetarian/vegan diets only
+      dietQuery.tags = { $regex: new RegExp('chay', 'i') };
     }
     
-    const allergiesQuery = allergies && allergies.length > 0
-      ? { 'ingredients.name': { $nin: allergies } }
-      : {};
+    // FIXED: Check if allergies is a valid array and not "Không"
+    const allergiesQuery = 
+      Array.isArray(allergies) && 
+      allergies.length > 0 && 
+      !allergies.includes('Không') && 
+      !allergies.includes('không')
+        ? { 'ingredients.name': { $nin: allergies } }
+        : {};
     
     // Pre-fetch recipes for each meal type
     const recipesByTag = {};
@@ -853,14 +881,14 @@ export const generateWeeklyMealPlan = async (req, res) => {
       const mealTag = mealTags[i];
       const normalizedTag = mealTag.toLowerCase();
       
-      // Build tag query - need to match both meal tag (sáng, trưa, tối) AND diet tag (chay) if applicable
+      // Build tag conditions - meal tag is required, "chay" tag is optional (vegetarian/vegan only)
       const tagConditions = [
         { tags: { $regex: new RegExp(`^${normalizedTag}$`, 'i') } } // Meal tag (sáng, trưa, tối)
       ];
       
-      // If diet requires "chay" tag, add it to conditions
+      // Add "chay" tag for vegetarian/vegan only
       if (dietQuery.tags && dietQuery.tags.$regex) {
-        tagConditions.push({ tags: { $regex: dietQuery.tags.$regex } }); // Diet tag (chay)
+        tagConditions.push({ tags: { $regex: dietQuery.tags.$regex } });
       }
       
       // Build final match query
@@ -869,20 +897,11 @@ export const generateWeeklyMealPlan = async (req, res) => {
         status: 'published'
       };
       
-      // Add tag conditions
+      // Use $and only if multiple tag conditions, otherwise use simple tags query
       if (tagConditions.length > 1) {
-        matchQuery.$and = [{ ...tagConditions[0] }, { ...tagConditions[1] }];
+        matchQuery.$and = tagConditions;
       } else {
         matchQuery.tags = tagConditions[0].tags;
-      }
-      
-      // For other diets (keto, paleo, etc.), add to matchQuery
-      if (dietQuery.tags && !dietQuery.tags.$regex) {
-        if (!matchQuery.$and) {
-          matchQuery.$and = [{ tags: matchQuery.tags || tagConditions[0].tags }];
-        }
-        matchQuery.$and.push({ tags: dietQuery.tags });
-        delete matchQuery.tags;
       }
       
       const recipesForTag = await Recipe.find(matchQuery)
