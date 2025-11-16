@@ -24,8 +24,22 @@ export const createBlog = async (req, res) => {
     // Log incoming request data for debugging
     console.log("=== CREATE BLOG REQUEST ===");
     console.log("req.body:", req.body);
-    console.log("req.file:", req.file ? { fieldname: req.file.fieldname, originalname: req.file.originalname, mimetype: req.file.mimetype } : null);
-    console.log("req.user:", req.user ? { _id: req.user._id, email: req.user.email, name: req.user.name } : null);
+    console.log(
+      "req.file:",
+      req.file
+        ? {
+            fieldname: req.file.fieldname,
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+          }
+        : null
+    );
+    console.log(
+      "req.user:",
+      req.user
+        ? { _id: req.user._id, email: req.user.email, name: req.user.name }
+        : null
+    );
 
     const {
       title,
@@ -39,7 +53,10 @@ export const createBlog = async (req, res) => {
 
     // Validate required fields
     if (!title || !content) {
-      console.error("Missing required fields:", { title: !!title, content: !!content });
+      console.error("Missing required fields:", {
+        title: !!title,
+        content: !!content,
+      });
       return res.status(400).json({
         success: false,
         error: "Vui lòng cung cấp đầy đủ thông tin: tiêu đề và nội dung",
@@ -90,8 +107,8 @@ export const createBlog = async (req, res) => {
         }
         // Validate ObjectIds if they exist
         if (parsedRelatedRecipes.length > 0) {
-          parsedRelatedRecipes = parsedRelatedRecipes.filter(id => {
-            if (typeof id === 'string') {
+          parsedRelatedRecipes = parsedRelatedRecipes.filter((id) => {
+            if (typeof id === "string") {
               return mongoose.Types.ObjectId.isValid(id);
             }
             return true;
@@ -109,6 +126,7 @@ export const createBlog = async (req, res) => {
 
     // Ensure authorId is properly formatted
     // authorId can be ObjectId or string, model accepts Mixed type
+    // !!! LỖI GỐC CỦA BẠN Ở ĐÂY: req.user._id đang là "admin"
     const authorIdValue = req.user._id;
 
     // Create blog with author from authenticated user
@@ -117,9 +135,9 @@ export const createBlog = async (req, res) => {
       slug,
       excerpt: excerpt || "",
       content,
-      author: req.user.name || req.user.email,
-      authorAvatar: req.user.avatar || "",
-      authorId: authorIdValue,
+      author: req.user.name || req.user.email, // Lưu tên (stale data)
+      authorAvatar: req.user.avatar || "", // Lưu avatar (stale data)
+      authorId: authorIdValue, // Lưu ID (đang là "admin")
       category: category || "",
       imageUrl: imageUrl || "",
       published: isPublished, // Luôn false, cần admin duyệt
@@ -154,24 +172,30 @@ export const createBlog = async (req, res) => {
         keyValue: createError.keyValue,
         errors: createError.errors,
       });
-      
+
       // Handle specific MongoDB errors
       if (createError.code === 11000) {
         // Duplicate key error (slug already exists)
         return res.status(400).json({
           success: false,
-          error: `Slug "${createError.keyValue?.slug || blogData.slug}" đã tồn tại. Vui lòng thử tiêu đề khác.`,
+          error: `Slug "${
+            createError.keyValue?.slug || blogData.slug
+          }" đã tồn tại. Vui lòng thử tiêu đề khác.`,
         });
       }
-      
-      if (createError.name === 'ValidationError') {
-        const validationErrors = Object.values(createError.errors || {}).map(err => err.message).join(', ');
+
+      if (createError.name === "ValidationError") {
+        const validationErrors = Object.values(
+          createError.errors || {}
+        )
+          .map((err) => err.message)
+          .join(", ");
         return res.status(400).json({
           success: false,
           error: `Lỗi validation: ${validationErrors}`,
         });
       }
-      
+
       // Re-throw to be caught by outer catch
       throw createError;
     }
@@ -195,12 +219,12 @@ export const createBlog = async (req, res) => {
     console.error("Error keyPattern:", error.keyPattern);
     console.error("Error keyValue:", error.keyValue);
     console.error("Error errors:", error.errors);
-    
+
     // If response was already sent, don't send again
     if (res.headersSent) {
       return;
     }
-    
+
     res.status(500).json({
       success: false,
       error: error.message || "Lỗi khi tạo blog",
@@ -285,133 +309,64 @@ export const getAllBlogs = async (req, res) => {
   }
 };
 
-// Helper function to normalize any date value to ISO string
-// Handles MongoDB Extended JSON format, Date objects, ISO strings, and timestamps
-const normalizeDate = (dateValue) => {
-  // Handle null, undefined, empty string
-  if (dateValue === null || dateValue === undefined || dateValue === '') {
-    return dateValue;
-  }
-  
-  try {
-    // Handle MongoDB Extended JSON format: { $date: "ISO-string" } or { $date: { $numberLong: "timestamp" } }
-    if (typeof dateValue === 'object' && dateValue !== null) {
-      // Check for Extended JSON format
-      if (dateValue.$date !== undefined) {
-        // Extended JSON format with ISO string
-        if (typeof dateValue.$date === 'string') {
-          const parsed = new Date(dateValue.$date);
-          if (!isNaN(parsed.getTime())) {
-            return parsed.toISOString();
-          }
-          console.warn("Invalid date string in $date:", dateValue.$date);
-          return null;
-        }
-        // Extended JSON format with timestamp object
-        if (dateValue.$date && typeof dateValue.$date === 'object' && dateValue.$date.$numberLong) {
-          const timestamp = parseInt(dateValue.$date.$numberLong);
-          if (!isNaN(timestamp)) {
-            return new Date(timestamp).toISOString();
-          }
-          console.warn("Invalid timestamp in $date.$numberLong:", dateValue.$date.$numberLong);
-          return null;
-        }
-        // Extended JSON format with direct timestamp number
-        if (typeof dateValue.$date === 'number') {
-          const parsed = new Date(dateValue.$date);
-          if (!isNaN(parsed.getTime())) {
-            return parsed.toISOString();
-          }
-          console.warn("Invalid number in $date:", dateValue.$date);
-          return null;
-        }
-      }
-      // Already a Date object
-      if (dateValue instanceof Date) {
-        if (!isNaN(dateValue.getTime())) {
-          return dateValue.toISOString();
-        }
-        console.warn("Invalid Date object:", dateValue);
-        return null;
-      }
-    }
-    
-    // Handle string ISO format
-    if (typeof dateValue === 'string') {
-      const parsed = new Date(dateValue);
-      if (!isNaN(parsed.getTime())) {
-        return parsed.toISOString();
-      }
-      console.warn("Invalid date string:", dateValue);
-      return null;
-    }
-    
-    // Handle number timestamp
-    if (typeof dateValue === 'number') {
-      const parsed = new Date(dateValue);
-      if (!isNaN(parsed.getTime())) {
-        return parsed.toISOString();
-      }
-      console.warn("Invalid timestamp number:", dateValue);
-      return null;
-    }
-    
-    // Return null for unrecognized formats
-    console.warn("Unrecognized date format:", typeof dateValue, dateValue);
-    return null;
-  } catch (error) {
-    console.error("Error normalizing date:", error, "Value:", dateValue, "Type:", typeof dateValue);
-    return null;
-  }
-};
-
-// Helper function to sanitize a single comment (handles nested replies recursively)
-const sanitizeComment = (comment) => {
-  if (!comment || typeof comment !== 'object') return comment;
-  
-  // Mutate directly to avoid issues with MongoDB objects
-  // Normalize createdAt
-  if (comment.createdAt) {
-    comment.createdAt = normalizeDate(comment.createdAt);
-  }
-  
-  // Normalize updatedAt if it exists
-  if (comment.updatedAt) {
-    comment.updatedAt = normalizeDate(comment.updatedAt);
-  }
-  
-  // Recursively sanitize replies
-  if (comment.replies && Array.isArray(comment.replies)) {
-    comment.replies = comment.replies.map(reply => sanitizeComment(reply));
-  }
-  
-  return comment;
-};
-
+// Helper function to sanitize date fields from MongoDB Extended JSON format
+// Converts dates to ISO strings to avoid validation issues
 const sanitizeBlogDates = (blog) => {
   if (!blog) return blog;
 
   try {
-    // Mutate directly instead of using spread operator to avoid issues with MongoDB lean() objects
     // Fix top-level date fields - convert to ISO string
-    const dateFields = ['createdAt', 'updatedAt', 'publishedAt', 'rejectedAt'];
-    dateFields.forEach(field => {
-      if (blog[field] !== undefined && blog[field] !== null) {
-        blog[field] = normalizeDate(blog[field]);
+    const dateFields = ["createdAt", "updatedAt", "publishedAt", "rejectedAt"];
+    dateFields.forEach((field) => {
+      if (blog[field]) {
+        if (typeof blog[field] === "object" && blog[field].$date) {
+          // MongoDB Extended JSON format
+          blog[field] = new Date(blog[field].$date).toISOString();
+        } else if (blog[field] instanceof Date) {
+          // Already a Date object
+          blog[field] = blog[field].toISOString();
+        }
       }
     });
 
     // Fix comments dates recursively - convert to ISO strings
     if (blog.comments && Array.isArray(blog.comments)) {
-      blog.comments = blog.comments.map(comment => sanitizeComment(comment));
+      blog.comments = blog.comments.map((comment) => {
+        if (comment.createdAt) {
+          if (
+            typeof comment.createdAt === "object" &&
+            comment.createdAt.$date
+          ) {
+            comment.createdAt = new Date(comment.createdAt.$date).toISOString();
+          } else if (comment.createdAt instanceof Date) {
+            comment.createdAt = comment.createdAt.toISOString();
+          }
+        }
+        // Fix replies dates recursively
+        if (comment.replies && Array.isArray(comment.replies)) {
+          comment.replies = comment.replies.map((reply) => {
+            if (reply.createdAt) {
+              if (
+                typeof reply.createdAt === "object" &&
+                reply.createdAt.$date
+              ) {
+                reply.createdAt = new Date(reply.createdAt.$date).toISOString();
+              } else if (reply.createdAt instanceof Date) {
+                reply.createdAt = reply.createdAt.toISOString();
+              }
+            }
+            return reply;
+          });
+        }
+        return comment;
+      });
     }
-    
-    return blog;
   } catch (error) {
     console.error("Error sanitizing blog dates:", error);
     // Return blog as-is if sanitization fails
-    return blog;
   }
+
+  return blog;
 };
 
 // @desc    Get single blog by ID or slug
@@ -420,33 +375,23 @@ const sanitizeBlogDates = (blog) => {
 export const getBlogById = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log("Getting blog by ID:", id);
 
     // Try to find by ID first, then by slug - use lean() to avoid validation
     let blog;
     try {
-      blog = await Blog.findById(id).lean();
+      // Thêm populate authorId để lấy tên và avatar
+      // *** SỬA: Yêu cầu populate trả về cả _id ***
+      blog = await Blog.findById(id)
+        .populate("authorId", "_id name avatar")
+        .lean();
       if (!blog) {
-        console.log("Blog not found by ID, trying slug:", id);
-        blog = await Blog.findOne({ slug: id }).lean();
-      }
-      if (blog) {
-        console.log("Blog found:", {
-          _id: blog._id,
-          title: blog.title,
-          hasComments: !!blog.comments,
-          commentsCount: blog.comments?.length || 0,
-          hasRelatedRecipes: !!blog.relatedRecipes,
-          relatedRecipesCount: blog.relatedRecipes?.length || 0
-        });
+        // Thêm populate authorId cho tìm kiếm bằng slug
+        blog = await Blog.findOne({ slug: id })
+          .populate("authorId", "_id name avatar")
+          .lean();
       }
     } catch (findError) {
       console.error("Error finding blog:", findError);
-      console.error("Error details:", {
-        message: findError.message,
-        stack: findError.stack,
-        id: id
-      });
       return res.status(500).json({
         success: false,
         error: "Lỗi khi tìm blog",
@@ -473,10 +418,18 @@ export const getBlogById = async (req, res) => {
       const userId = req.user?._id;
 
       // Only allow access if user is the author or admin
+      // *** SỬA: Đảm bảo so sánh 2 chuỗi string ***
+      const blogAuthorIdString = blog.authorId
+        ? blog.authorId._id
+          ? blog.authorId._id.toString() // Case populate thành công
+          : blog.authorId.toString() // Case populate thất bại
+        : null;
+      const currentUserIdString = userId ? userId.toString() : null;
+
       if (
-        !userId ||
-        (blog.authorId &&
-          blog.authorId.toString() !== userId.toString() &&
+        !currentUserIdString ||
+        (blogAuthorIdString &&
+          blogAuthorIdString !== currentUserIdString &&
           req.user.role !== "admin")
       ) {
         return res.status(403).json({
@@ -489,27 +442,8 @@ export const getBlogById = async (req, res) => {
     // Increment views using raw MongoDB update to completely bypass Mongoose validation
     // This is the safest way to avoid any validation issues
     try {
-      // Validate and convert _id safely
-      let blogObjectId;
-      if (blog._id) {
-        if (typeof blog._id === 'string') {
-          if (mongoose.Types.ObjectId.isValid(blog._id)) {
-            blogObjectId = new mongoose.Types.ObjectId(blog._id);
-          } else {
-            console.error("Invalid blog._id format:", blog._id);
-            throw new Error("Invalid blog ID format");
-          }
-        } else if (blog._id instanceof mongoose.Types.ObjectId) {
-          blogObjectId = blog._id;
-        } else {
-          blogObjectId = new mongoose.Types.ObjectId(blog._id.toString());
-        }
-      } else {
-        throw new Error("Blog _id is missing");
-      }
-
       await Blog.collection.updateOne(
-        { _id: blogObjectId },
+        { _id: new mongoose.Types.ObjectId(blog._id) },
         { $inc: { views: 1 } }
       );
       // Update the local blog object for response
@@ -522,143 +456,63 @@ export const getBlogById = async (req, res) => {
     }
 
     // Manually populate relatedRecipes if needed (since we're using lean())
-    if (blog.relatedRecipes && Array.isArray(blog.relatedRecipes) && blog.relatedRecipes.length > 0) {
-      try {
-        // Filter and validate ObjectIds
-        const validRecipeIds = blog.relatedRecipes
-          .filter(id => {
-            if (!id) return false;
-            try {
-              if (typeof id === 'string') {
-                return mongoose.Types.ObjectId.isValid(id);
-              }
-              if (id instanceof mongoose.Types.ObjectId) {
-                return true;
-              }
-              // Try to convert to string and validate
-              return mongoose.Types.ObjectId.isValid(id.toString());
-            } catch (e) {
-              console.error("Error validating recipe ID:", id, e);
-              return false;
-            }
-          })
-          .map(id => {
-            if (typeof id === 'string') {
-              return new mongoose.Types.ObjectId(id);
-            }
-            if (id instanceof mongoose.Types.ObjectId) {
-              return id;
-            }
-            return new mongoose.Types.ObjectId(id.toString());
-          });
-
-        if (validRecipeIds.length > 0) {
-          const recipes = await Recipe.find({ 
-            _id: { $in: validRecipeIds } 
-          }).lean();
-          blog.relatedRecipes = recipes;
-        } else {
-          // If no valid IDs, set to empty array
-          blog.relatedRecipes = [];
-        }
-      } catch (recipeError) {
-        console.error("Error populating relatedRecipes:", recipeError);
-        // Set to empty array on error to avoid breaking the response
-        blog.relatedRecipes = [];
-      }
+    if (blog.relatedRecipes && blog.relatedRecipes.length > 0) {
+      const recipes = await Recipe.find({
+        _id: { $in: blog.relatedRecipes },
+      }).lean();
+      blog.relatedRecipes = recipes;
     }
+
+    // --- START: SỬA LỖI VÀ CHUẨN HÓA AUTHOR OBJECT ---
+    // Khởi tạo author object với dữ liệu stale (phòng trường hợp populate lỗi)
+    let authorInfo = {
+      _id: null,
+      name: blog.author, // Tên được lưu lúc tạo blog
+      avatar: blog.authorAvatar, // Avatar được lưu lúc tạo blog
+    };
+
+    if (blog.authorId && typeof blog.authorId === "object") {
+      // Case 1: Populate THÀNH CÔNG. blog.authorId là object User.
+      authorInfo._id = blog.authorId._id;
+      authorInfo.name = blog.authorId.name || blog.author;
+      authorInfo.avatar = blog.authorId.avatar || blog.authorAvatar;
+    } else if (blog.authorId) {
+      // Case 2: Populate THẤT BẠI. blog.authorId là string (ví dụ: "admin")
+      // Đây là ID (dù là ID sai), gán nó vào _id
+      authorInfo._id = blog.authorId;
+      // Tên (blog.author) và avatar (blog.authorAvatar) giữ nguyên giá trị stale
+    }
+
+    // Gán object author chuẩn hóa vào blog
+    blog.author = authorInfo;
+
+    // Xóa các trường cũ để tránh nhầm lẫn ở frontend
+    delete blog.authorId;
+    delete blog.authorAvatar;
+    // --- END: SỬA LỖI VÀ CHUẨN HÓA AUTHOR OBJECT ---
 
     // Convert to plain object to ensure no Mongoose document methods remain
     // This prevents any validation from being triggered during JSON serialization
     // Use a custom replacer to handle any remaining issues
     let plainBlog;
     try {
-      // Use JSON.stringify with a replacer function to handle special cases
-      // Note: JSON.stringify will throw if there are circular references, which we catch
-      plainBlog = JSON.parse(JSON.stringify(blog, (key, value) => {
-        // Convert any remaining Date objects to ISO strings
-        if (value instanceof Date) {
-          return value.toISOString();
-        }
-        
-        // Convert MongoDB Extended JSON format if still present
-        if (value && typeof value === 'object' && value !== null && value.$date) {
-          try {
-            if (typeof value.$date === 'string') {
-              return new Date(value.$date).toISOString();
-            }
-            if (value.$date.$numberLong) {
-              return new Date(parseInt(value.$date.$numberLong)).toISOString();
-            }
-            if (typeof value.$date === 'number') {
-              return new Date(value.$date).toISOString();
-            }
-          } catch (dateError) {
-            console.error("Error converting $date format:", dateError, value);
-            return null;
+      plainBlog = JSON.parse(
+        JSON.stringify(blog, (key, value) => {
+          // Convert any remaining Date objects to ISO strings
+          if (value instanceof Date) {
+            return value.toISOString();
           }
-        }
-        
-        // Convert ObjectId to string
-        if (value instanceof mongoose.Types.ObjectId) {
-          return value.toString();
-        }
-        
-        // Handle undefined values (JSON.stringify converts them to null by default)
-        if (value === undefined) {
-          return null;
-        }
-        
-        return value;
-      }));
+          // Convert MongoDB Extended JSON format if still present
+          if (value && typeof value === "object" && value.$date) {
+            return new Date(value.$date).toISOString();
+          }
+          return value;
+        })
+      );
     } catch (serializeError) {
       console.error("Error serializing blog:", serializeError);
-      console.error("Error details:", {
-        message: serializeError.message,
-        stack: serializeError.stack,
-        blogId: blog._id,
-        title: blog.title,
-        hasComments: !!blog.comments,
-        commentsLength: blog.comments?.length,
-        hasRelatedRecipes: !!blog.relatedRecipes
-      });
-      
-      // If serialization fails, try a simpler approach - just convert to plain object
-      try {
-        // Fallback: manually create a plain object with only safe properties
-        plainBlog = {
-          _id: blog._id?.toString(),
-          title: blog.title,
-          slug: blog.slug,
-          excerpt: blog.excerpt,
-          content: blog.content,
-          author: blog.author,
-          authorAvatar: blog.authorAvatar,
-          authorId: blog.authorId,
-          category: blog.category,
-          imageUrl: blog.imageUrl,
-          published: blog.published,
-          publishedAt: blog.publishedAt,
-          rejected: blog.rejected,
-          rejectionReason: blog.rejectionReason,
-          rejectedAt: blog.rejectedAt,
-          tags: blog.tags,
-          likes: blog.likes,
-          comments: blog.comments,
-          views: blog.views,
-          createdAt: blog.createdAt,
-          updatedAt: blog.updatedAt,
-          relatedRecipes: blog.relatedRecipes
-        };
-      } catch (fallbackError) {
-        console.error("Fallback serialization also failed:", fallbackError);
-        // Last resort: return minimal blog data
-        plainBlog = {
-          _id: blog._id?.toString(),
-          title: blog.title || 'Unknown',
-          error: 'Serialization error occurred'
-        };
-      }
+      // Fallback: return blog as-is (should already be sanitized)
+      plainBlog = blog;
     }
 
     res.status(200).json({
@@ -728,7 +582,10 @@ export const updateBlog = async (req, res) => {
     if (published !== undefined) {
       // Không cho phép user tự publish, chỉ admin mới có thể
       // Giữ nguyên trạng thái published hiện tại
-      console.log("User attempted to change published status, ignoring. Current status:", blog.published);
+      console.log(
+        "User attempted to change published status, ignoring. Current status:",
+        blog.published
+      );
     }
 
     // Update image if uploaded
@@ -1123,7 +980,7 @@ export const getAllBlogsAdmin = async (req, res) => {
     if (published !== undefined) {
       const publishedValue = published === "true" || published === true;
       query.published = publishedValue;
-      
+
       // Nếu filter published, loại trừ rejected blogs (trừ khi đang xem rejected)
       const isRejectedTab = rejected === "true" || rejected === true;
       if (publishedValue && !isRejectedTab) {
@@ -1305,15 +1162,16 @@ export const updateBlogAdmin = async (req, res) => {
     // Update published status
     if (published !== undefined) {
       // Handle both boolean and string values (from JSON or FormData)
-      const publishedValue = typeof published === 'string' 
-        ? published === 'true' 
-        : Boolean(published);
-      
+      const publishedValue =
+        typeof published === "string"
+          ? published === "true"
+          : Boolean(published);
+
       // Chỉ gửi thông báo nếu chuyển từ chưa duyệt sang đã duyệt
       if (!wasPublished && publishedValue) {
         shouldNotifyApproved = true;
       }
-      
+
       blog.published = publishedValue;
       if (publishedValue && !blog.publishedAt) {
         blog.publishedAt = new Date();
@@ -1328,15 +1186,16 @@ export const updateBlogAdmin = async (req, res) => {
 
     // Update rejected status
     if (rejected !== undefined) {
-      const rejectedValue = typeof rejected === 'string' 
-        ? rejected === 'true' 
-        : Boolean(rejected);
-      
+      const rejectedValue =
+        typeof rejected === "string"
+          ? rejected === "true"
+          : Boolean(rejected);
+
       // Chỉ gửi thông báo nếu chuyển từ chưa từ chối sang bị từ chối
       if (!wasRejected && rejectedValue) {
         shouldNotifyRejected = true;
       }
-      
+
       blog.rejected = rejectedValue;
       if (rejectedValue) {
         blog.rejectedAt = new Date();
@@ -1378,44 +1237,45 @@ export const updateBlogAdmin = async (req, res) => {
 
     // Send notifications to blog author
     if (blog.authorId) {
-      const authorId = typeof blog.authorId === 'object' && blog.authorId._id 
-        ? blog.authorId._id 
-        : blog.authorId;
-      
+      const authorId =
+        typeof blog.authorId === "object" && blog.authorId._id
+          ? blog.authorId._id
+          : blog.authorId;
+
       if (shouldNotifyApproved) {
         // Gửi thông báo blog đã được duyệt
         await sendNotification({
           userId: authorId,
-          type: 'blog_approved',
-          title: 'Blog đã được duyệt',
+          type: "blog_approved",
+          title: "Blog đã được duyệt",
           message: `Blog "${blog.title}" của bạn đã được admin duyệt và đã được hiển thị công khai.`,
           actorId: req.user._id,
           blogId: blog._id,
           metadata: {
             blogTitle: blog.title,
-            blogId: blog._id.toString()
-          }
+            blogId: blog._id.toString(),
+          },
         });
       }
-      
+
       if (shouldNotifyRejected) {
         // Gửi thông báo blog bị từ chối
-        const rejectionMsg = blog.rejectionReason 
+        const rejectionMsg = blog.rejectionReason
           ? `Blog "${blog.title}" của bạn đã bị từ chối với lý do: ${blog.rejectionReason}`
           : `Blog "${blog.title}" của bạn đã bị từ chối.`;
-        
+
         await sendNotification({
           userId: authorId,
-          type: 'blog_rejected',
-          title: 'Blog bị từ chối',
+          type: "blog_rejected",
+          title: "Blog bị từ chối",
           message: rejectionMsg,
           actorId: req.user._id,
           blogId: blog._id,
           metadata: {
             blogTitle: blog.title,
             blogId: blog._id.toString(),
-            rejectionReason: blog.rejectionReason || ''
-          }
+            rejectionReason: blog.rejectionReason || "",
+          },
         });
       }
     }
@@ -1451,15 +1311,15 @@ export const getBlogStats = async (req, res) => {
     const totalBlogs = await Blog.countDocuments();
 
     // Published blogs (not rejected)
-    const publishedBlogs = await Blog.countDocuments({ 
+    const publishedBlogs = await Blog.countDocuments({
       published: true,
-      rejected: { $ne: true }
+      rejected: { $ne: true },
     });
 
     // Unpublished blogs (not rejected)
-    const unpublishedBlogs = await Blog.countDocuments({ 
+    const unpublishedBlogs = await Blog.countDocuments({
       published: false,
-      rejected: { $ne: true }
+      rejected: { $ne: true },
     });
 
     // Rejected blogs
@@ -1481,7 +1341,8 @@ export const getBlogStats = async (req, res) => {
     const totalComments = await Blog.aggregate([
       { $group: { _id: null, totalComments: { $sum: { $size: "$comments" } } } },
     ]);
-    const comments = totalComments.length > 0 ? totalComments[0].totalComments : 0;
+    const comments =
+      totalComments.length > 0 ? totalComments[0].totalComments : 0;
 
     // Blogs by category
     const blogsByCategory = await Blog.aggregate([
