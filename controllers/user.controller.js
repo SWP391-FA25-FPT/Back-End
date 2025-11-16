@@ -255,6 +255,7 @@ export const updateProfile = async (req, res) => {
         'diet',
         'allergies',
         'meals',
+        'knowledgeSource',
         'profileImageUrl',
       ];
 
@@ -293,13 +294,18 @@ export const updateProfile = async (req, res) => {
       height,
       gender,
       age,
+      dateOfBirth,
       workHabits,
       eatingHabits,
       diet,
       allergies,
       meals,
+      knowledgeSource,
       profileImageUrl,
     } = profilePayload;
+
+    // Debug: Log knowledgeSource to verify it's being received
+    console.log('Profile payload knowledgeSource:', knowledgeSource);
 
     const user = await User.findById(targetUserId);
 
@@ -320,15 +326,63 @@ export const updateProfile = async (req, res) => {
     const normalizedAllergies = normalizeArray(allergies);
     const normalizedMeals = normalizeArray(meals);
 
+    // Handle dateOfBirth: if provided, save it and calculate age
+    if (dateOfBirth !== undefined && dateOfBirth !== null && dateOfBirth !== '') {
+      // dateOfBirth can be a Date object, ISO string, or date string (YYYY-MM-DD)
+      let birthDate;
+      
+      if (dateOfBirth instanceof Date) {
+        birthDate = new Date(dateOfBirth);
+      } else if (typeof dateOfBirth === 'string') {
+        // If it's in YYYY-MM-DD format, parse it as local date to avoid timezone issues
+        const dateMatch = dateOfBirth.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (dateMatch) {
+          // Create date using local timezone (not UTC) to avoid -1 day issue
+          const year = parseInt(dateMatch[1], 10);
+          const month = parseInt(dateMatch[2], 10) - 1; // Month is 0-indexed
+          const day = parseInt(dateMatch[3], 10);
+          birthDate = new Date(year, month, day);
+        } else {
+          // Fallback to standard Date parsing for ISO strings
+          birthDate = new Date(dateOfBirth);
+        }
+      } else {
+        birthDate = new Date(dateOfBirth);
+      }
+      
+      if (!isNaN(birthDate.getTime())) {
+        // Set time to midnight to avoid timezone issues
+        birthDate.setHours(0, 0, 0, 0);
+        user.profile.dateOfBirth = birthDate;
+        // Calculate age from dateOfBirth
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+          calculatedAge--;
+        }
+        user.profile.age = calculatedAge;
+      }
+    } else if (normalizedAge !== undefined) {
+      // If only age is provided (backward compatibility), save it but don't set dateOfBirth
+      user.profile.age = normalizedAge;
+    }
+
     if (normalizedWeight !== undefined) user.profile.weight = normalizedWeight;
     if (normalizedHeight !== undefined) user.profile.height = normalizedHeight;
     if (gender) user.profile.gender = gender;
-    if (normalizedAge !== undefined) user.profile.age = normalizedAge;
     if (workHabits) user.profile.workHabits = workHabits;
     if (eatingHabits) user.profile.eatingHabits = eatingHabits;
     if (diet) user.profile.diet = diet;
     if (normalizedAllergies) user.profile.allergies = normalizedAllergies;
     if (normalizedMeals) user.profile.meals = normalizedMeals;
+    if (knowledgeSource !== undefined && knowledgeSource !== null && knowledgeSource !== '') {
+      user.profile.knowledgeSource = knowledgeSource;
+      console.log('Saved knowledgeSource to user profile:', knowledgeSource);
+    } else {
+      console.log('knowledgeSource not saved - value:', knowledgeSource);
+    }
 
     if (req.file && req.file.path) {
       user.profile.profileImageUrl = req.file.path;

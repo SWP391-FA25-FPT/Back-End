@@ -378,14 +378,20 @@ export const updateChallenge = async (req, res) => {
 // @access  Private (Admin only)
 export const deleteChallenge = async (req, res) => {
   try {
-    const challenge = await Challenge.findById(req.params.id);
+    const challengeId = req.params.id;
+    console.log("Attempting to delete challenge:", challengeId);
+
+    const challenge = await Challenge.findById(challengeId);
 
     if (!challenge) {
+      console.log("Challenge not found:", challengeId);
       return res.status(404).json({
         success: false,
         error: "Không tìm thấy thử thách",
       });
     }
+
+    console.log("Found challenge:", challenge.title);
 
     // Delete image from Cloudinary if it exists
     if (challenge.image && challenge.image.includes("cloudinary.com")) {
@@ -397,10 +403,22 @@ export const deleteChallenge = async (req, res) => {
         console.log("Deleted challenge image:", publicId);
       } catch (err) {
         console.error("Error deleting challenge image:", err.message);
+        // Continue with deletion even if image deletion fails
       }
     }
 
-    await challenge.deleteOne();
+    // Delete the challenge
+    const result = await Challenge.deleteOne({ _id: challengeId });
+    console.log("Delete result:", result);
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Không thể xóa thử thách",
+      });
+    }
+
+    console.log("Challenge deleted successfully:", challengeId);
 
     res.status(200).json({
       success: true,
@@ -409,6 +427,7 @@ export const deleteChallenge = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete challenge error:", error);
+    console.error("Error stack:", error.stack);
 
     if (error.kind === "ObjectId") {
       return res.status(404).json({

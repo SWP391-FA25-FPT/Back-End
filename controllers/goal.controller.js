@@ -1,5 +1,6 @@
 import Goal from '../models/Goal.js';
 import User from '../models/User.model.js';
+import ProgressTracking from '../models/ProgressTracking.js';
 import {
   calculateBMR,
   calculateTDEE,
@@ -24,13 +25,25 @@ export const createGoal = async (req, res) => {
       });
     }
     
-    const { weight, height, age, gender, workHabits } = user.profile;
+    const { weight, height, age, dateOfBirth, gender, workHabits } = user.profile;
+    
+    // Calculate age from dateOfBirth if age is not available
+    let userAge = age;
+    if (!userAge && dateOfBirth) {
+      const birthDate = new Date(dateOfBirth);
+      const today = new Date();
+      userAge = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        userAge--;
+      }
+    }
     
     // Validate required profile fields
-    if (!weight || !height || !age || !gender || !workHabits) {
+    if (!weight || !height || !userAge || !gender || !workHabits) {
       return res.status(400).json({
         success: false,
-        error: 'Thiếu thông tin hồ sơ: cân nặng, chiều cao, tuổi, giới tính, hoặc mức độ hoạt động'
+        error: 'Thiếu thông tin hồ sơ: cân nặng, chiều cao, tuổi (hoặc ngày sinh), giới tính, hoặc mức độ hoạt động'
       });
     }
     
@@ -70,7 +83,7 @@ export const createGoal = async (req, res) => {
     }
     
     // Calculate BMR and TDEE
-    const bmr = calculateBMR(weight, height, age, gender);
+    const bmr = calculateBMR(weight, height, userAge, gender);
     const tdee = calculateTDEE(bmr, workHabits);
     
     // Calculate target calories
@@ -104,6 +117,34 @@ export const createGoal = async (req, res) => {
         note: 'Cân nặng ban đầu'
       }]
     });
+    
+    // Automatically create initial progress record when goal is created
+    try {
+      const recordDate = new Date(startDate);
+      recordDate.setHours(0, 0, 0, 0);
+      
+      // Check if record already exists for this date
+      const existingRecord = await ProgressTracking.findOne({
+        userId: req.user._id,
+        date: recordDate
+      });
+      
+      if (!existingRecord) {
+        await ProgressTracking.create({
+          userId: req.user._id,
+          goalId: goal._id,
+          date: recordDate,
+          actualWeight: weight,
+          actualCalories: 0,
+          waterIntake: 0,
+          exercised: false,
+          notes: 'Bản ghi ban đầu khi tạo mục tiêu'
+        });
+      }
+    } catch (progressError) {
+      // Log error but don't fail goal creation
+      console.error('Error creating initial progress record:', progressError);
+    }
     
     res.status(201).json({
       success: true,
